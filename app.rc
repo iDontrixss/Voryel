@@ -1,0 +1,5 @@
+// Embebe app.manifest dentro del .exe en tiempo de compilación (MinGW/windres).
+// ID 1, tipo RT_MANIFEST (24) — el formato estándar que Windows espera
+// para leer la declaración de DPI-awareness sin necesitar que el usuario
+// la configure a mano en las propiedades del .exe.
+1 24 "app.manifest"

@@ -1,0 +1,41 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file>icons/home.svg</file>
+    <file>icons/folder.svg</file>
+    <file>icons/message.svg</file>
+    <file>icons/settings.svg</file>
+    <file>icons/bot.svg</file>
+    <file>icons/history.svg</file>
+    <file>icons/layers.svg</file>
+    <file>icons/pause.svg</file>
+    <file>icons/play.svg</file>
+    <file>icons/x.svg</file>
+    <file>icons/eye.svg</file>
+    <file>icons/git-compare.svg</file>
+    <file>icons/check-circle.svg</file>
+    <file>icons/chevron-down.svg</file>
+    <file>icons/chevron-up.svg</file>
+    <file>icons/volume.svg</file>
+    <file>icons/cpu.svg</file>
+    <file>icons/list.svg</file>
+    <file>icons/send.svg</file>
+    <file>icons/paperclip.svg</file>
+    <file>icons/stop.svg</file>
+    <file>icons/user.svg</file>
+    <file>icons/shield.svg</file>
+    <file>icons/terminal.svg</file>
+    <file>icons/file-text.svg</file>
+    <file>icons/edit.svg</file>
+    <file>icons/copy.svg</file>
+    <file>icons/Logo-Voryel.ico</file>
+    <file>icons/claude.svg</file>
+    <file>icons/openai.svg</file>
+    <file>icons/gemini.svg</file>
+    <file>icons/groq.svg</file>
+    <file>icons/ollama.svg</file>
+    <file>icons/deepseek.svg</file>
+    <file>icons/trash.svg</file>
+    <file>icons/gear.svg</file>
+    <file>icons/puzzle.svg</file>
+  </qresource>
+</RCC>

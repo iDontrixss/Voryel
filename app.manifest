@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="Voryel" version="1.0.0.0" />
+
+  <!--
+    Sin esto, Windows no sabe que la app maneja su propio escalado y le
+    aplica un "bitmap stretch" a toda la ventana en pantallas con escalado
+    (125%/150%/etc). Eso es lo que causaba tanto los bordes dentados
+    ("efecto sierra") como el desalineamiento entre bordes/sombras: Qt
+    dibuja nítido a resolución real, pero Windows lo reescala como si
+    fuera una imagen, generando artefactos de redondeo por píxel.
+  -->
+  <application xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
+      <ws2:dpiAwareness>PerMonitorV2</ws2:dpiAwareness>
+    </windowsSettings>
+  </application>
+
+  <!-- Fallback para versiones de Windows que no reconocen PerMonitorV2 -->
+  <application xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+    </windowsSettings>
+  </application>
+</assembly>

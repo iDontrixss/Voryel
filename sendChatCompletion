@@ -1,0 +1,6 @@
+43:    m_messages.append(msg);
+46:    m_client->sendChatCompletion(m_messages, m_config);
+50:    m_client->cancel();
+68:void ChatSession::onError(const QString &message) {
+72:        m_messages.removeLast();
+78:    m_client->detectModels(baseUrl);
