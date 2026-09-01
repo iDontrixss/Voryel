@@ -2,6 +2,7 @@
 #include "SolidPanel.h"
 #include "Style.h"
 #include "IconUtil.h"
+#include "ProviderIconResolver.h"
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPixmap>
@@ -9,6 +10,7 @@
 #include <QPainter>
 #include <QEvent>
 #include <QMouseEvent>
+#include <QWindow>
 #include <QFontMetrics>
 #include <QSizePolicy>
 
@@ -55,10 +57,10 @@ TitleBar::TitleBar(QWidget *parent) : QWidget(parent) {
     badgeLayout->setContentsMargins(6, 2, 10, 2);
     badgeLayout->setSpacing(6);
 
-    auto *modelIcon = makeModelIcon("Claude 3.5 Sonnet");
+    auto *modelIcon = makeModelIcon("Sin modelo");
     badgeLayout->addWidget(modelIcon);
 
-    m_modelLabel = new QLabel("Claude 3.5 Sonnet");
+    m_modelLabel = new QLabel("Sin modelo");
     m_modelLabel->setMinimumWidth(60);
     m_modelLabel->setMaximumWidth(150);
     m_modelLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
@@ -139,6 +141,18 @@ bool TitleBar::isDragRegion(const QPoint &localPos) const {
     return true;
 }
 
+void TitleBar::mousePressEvent(QMouseEvent *event) {
+    if (event->button() == Qt::LeftButton && isDragRegion(event->position().toPoint())) {
+        if (auto *handle = window()->windowHandle()) {
+            if (handle->startSystemMove()) {
+                event->accept();
+                return;
+            }
+        }
+    }
+    QWidget::mousePressEvent(event);
+}
+
 void TitleBar::mouseDoubleClickEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
         if (auto *w = window()) {
@@ -166,7 +180,10 @@ bool TitleBar::eventFilter(QObject *watched, QEvent *event) {
 }
 
 static QString modelSvgPath(const QString &modelName) {
+    const QString providerIcon = ProviderIconResolver::iconPath(modelName);
+    if (!providerIcon.isEmpty()) return providerIcon;
     const QString lower = modelName.toLower();
+    if (lower.contains("lm studio")) return ":/icons/icons/cpu.svg";
     if (lower.contains("claude")) return ":/icons/icons/claude.svg";
     if (lower.contains("gpt") || lower.contains("openai")) return ":/icons/icons/openai.svg";
     if (lower.contains("gemini")) return ":/icons/icons/gemini.svg";
@@ -177,14 +194,16 @@ static QString modelSvgPath(const QString &modelName) {
 }
 
 QLabel* TitleBar::makeModelIcon(const QString &modelName) {
-    const int size = 18;
+    const int size = 22;
     auto *label = new QLabel();
     label->setFixedSize(size, size);
-    QString svgPath = modelSvgPath(modelName);
-    if (svgPath.isEmpty()) {
-        label->setStyleSheet(QString("background: %1; border: 2px solid %2; border-radius: 9px;").arg(Style::VIOLET, Style::INK));
-    } else {
+    const QPixmap providerMark = ProviderIconResolver::normalizedPixmap(modelName, size);
+    if (!providerMark.isNull()) {
+        label->setPixmap(providerMark);
+    } else if (const QString svgPath = modelSvgPath(modelName); !svgPath.isEmpty()) {
         label->setPixmap(QIcon(svgPath).pixmap(size, size));
+    } else {
+        label->setStyleSheet(QString("background: %1; border: 2px solid %2; border-radius: 9px;").arg(Style::VIOLET, Style::INK));
     }
     return label;
 }

@@ -13,6 +13,10 @@
 #include <QLayoutItem>
 #include <QtGlobal>
 #include <QSizePolicy>
+#include <QLineEdit>
+#include <QSettings>
+#include <QUuid>
+#include <QDateTime>
 
 namespace {
 
@@ -95,11 +99,13 @@ ProjectView::ProjectView(QWidget *parent) : QWidget(parent) {
     scroll->setWidget(content);
     root->addWidget(scroll);
 
+    loadProjects();
     rebuild();
 }
 
 void ProjectView::setProjects(const QVector<ProjectEntry> &projects) {
     m_projects = projects;
+    saveProjects();
     rebuild();
 }
 
@@ -132,12 +138,22 @@ void ProjectView::rebuild() {
     titleCol->addWidget(subtitle);
     header->addLayout(titleCol, 1);
 
-    auto *newBtn = primaryButton("＋  Crear proyecto");
-    connect(newBtn, &QPushButton::clicked, this, &ProjectView::createProjectRequested);
+    auto *newBtn = primaryButton(m_creationVisible ? "Cerrar formulario" : "＋  Crear proyecto");
+    connect(newBtn, &QPushButton::clicked, this, [this]() {
+        m_creationVisible = !m_creationVisible;
+        rebuild();
+    });
     header->addWidget(newBtn, 0, Qt::AlignTop);
     m_contentLayout->addLayout(header);
 
+    if (m_creationVisible)
+        m_contentLayout->addWidget(makeCreationCard());
+
     if (m_projects.isEmpty()) {
+        if (m_creationVisible) {
+            m_contentLayout->addStretch();
+            return;
+        }
         m_contentLayout->addStretch(1);
         auto *emptyRow = new QHBoxLayout();
         emptyRow->addStretch(1);
@@ -161,7 +177,7 @@ void ProjectView::rebuild() {
     auto *hintText = new QVBoxLayout();
     auto *hintTitle = new QLabel("Workspaces guardados");
     hintTitle->setStyleSheet(QString("font-size: 13px; font-weight: 900; color: %1; border: none;").arg(Style::INK));
-    auto *hintSub = muted("Estos son proyectos mock por ahora. Después se conectan a carpetas reales y proyectos recientes.", 11);
+    auto *hintSub = muted("Accesos guardados para retomar cada workspace desde Voryel.", 11);
     hintText->addWidget(hintTitle);
     hintText->addWidget(hintSub);
     hintLayout->addLayout(hintText, 1);
@@ -206,13 +222,116 @@ QWidget* ProjectView::makeEmptyState() {
 
     auto *btn = primaryButton("Crear primer proyecto");
     btn->setMinimumWidth(210);
-    connect(btn, &QPushButton::clicked, this, &ProjectView::createProjectRequested);
+    connect(btn, &QPushButton::clicked, this, [this]() {
+        m_creationVisible = true;
+        rebuild();
+    });
     layout->addWidget(btn, 0, Qt::AlignHCenter);
 
-    auto *note = muted("Luego aparecerá acá como una card de acceso rápido.", 11);
-    note->setAlignment(Qt::AlignCenter);
-    layout->addWidget(note);
     return card;
+}
+
+QWidget* ProjectView::makeCreationCard() {
+    auto *card = new SolidPanel();
+    card->setFillColor(QColor(Style::WHITE));
+    card->setCornerRadius(14);
+    card->setFullBorder(QColor(Style::INK), 2);
+    card->setHardShadow(QColor(Style::INK), 3, 3);
+
+    auto *layout = new QVBoxLayout(card);
+    layout->setContentsMargins(18, 16, 21, 20);
+    layout->setSpacing(10);
+    auto *title = new QLabel("Nuevo proyecto");
+    title->setStyleSheet(QString("font-size: 16px; font-weight: 900; color: %1; border: none;").arg(Style::INK));
+    layout->addWidget(title);
+
+    auto fieldStyle = QString(
+        "QLineEdit { background: %1; color: %2; border: 2px solid %3; border-radius: 9px;"
+        " padding: 7px 10px; font-size: 12px; } QLineEdit:focus { border-color: %4; }"
+    ).arg(Style::BG_LILAC, Style::INK, Style::INK, Style::VIOLET);
+
+    auto *nameLabel = muted("Nombre del proyecto", 11);
+    auto *nameEdit = new QLineEdit();
+    nameEdit->setPlaceholderText("Ej.: Sitio de Loryq");
+    nameEdit->setStyleSheet(fieldStyle);
+    layout->addWidget(nameLabel);
+    layout->addWidget(nameEdit);
+
+    auto *directoryLabel = muted("Directorio (opcional)", 11);
+    auto *directoryEdit = new QLineEdit();
+    directoryEdit->setPlaceholderText("/home/usuario/proyectos/mi-proyecto");
+    directoryEdit->setStyleSheet(fieldStyle);
+    layout->addWidget(directoryLabel);
+    layout->addWidget(directoryEdit);
+
+    auto *actions = new QHBoxLayout();
+    actions->addStretch();
+    auto *cancel = ghostButton("Cancelar");
+    auto *create = primaryButton("Crear proyecto");
+    create->setEnabled(false);
+    connect(nameEdit, &QLineEdit::textChanged, create, [nameEdit, create]() {
+        create->setEnabled(!nameEdit->text().trimmed().isEmpty());
+    });
+    connect(cancel, &QPushButton::clicked, this, [this]() {
+        m_creationVisible = false;
+        rebuild();
+    });
+    connect(create, &QPushButton::clicked, this, [this, nameEdit, directoryEdit]() {
+        const QString name = nameEdit->text().trimmed();
+        if (name.isEmpty()) return;
+        ProjectEntry project;
+        project.id = "project_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+        project.name = name;
+        project.path = directoryEdit->text().trimmed();
+        project.stack = "Workspace";
+        project.color = Style::VIOLET;
+        project.lastActive = QDateTime::currentDateTime().toString("dd MMM · HH:mm");
+        m_projects.prepend(project);
+        m_activeProject = project.id;
+        m_creationVisible = false;
+        saveProjects();
+        rebuild();
+        emit projectsChanged();
+        emit projectOpened(project.id);
+    });
+    actions->addWidget(cancel);
+    actions->addWidget(create);
+    layout->addLayout(actions);
+    return card;
+}
+
+void ProjectView::loadProjects() {
+    QSettings settings("Loryq", "Voryel");
+    const int count = settings.beginReadArray("projects");
+    m_projects.clear();
+    for (int i = 0; i < count; ++i) {
+        settings.setArrayIndex(i);
+        ProjectEntry project;
+        project.id = settings.value("id").toString();
+        project.name = settings.value("name").toString();
+        project.path = settings.value("path").toString();
+        project.stack = settings.value("stack", "Workspace").toString();
+        project.color = settings.value("color", Style::VIOLET).toString();
+        project.lastActive = settings.value("lastActive").toString();
+        if (!project.id.isEmpty() && !project.name.isEmpty()) m_projects.append(project);
+    }
+    settings.endArray();
+}
+
+void ProjectView::saveProjects() const {
+    QSettings settings("Loryq", "Voryel");
+    settings.beginWriteArray("projects");
+    for (int i = 0; i < m_projects.size(); ++i) {
+        settings.setArrayIndex(i);
+        const ProjectEntry &project = m_projects[i];
+        settings.setValue("id", project.id);
+        settings.setValue("name", project.name);
+        settings.setValue("path", project.path);
+        settings.setValue("stack", project.stack);
+        settings.setValue("color", project.color);
+        settings.setValue("lastActive", project.lastActive);
+    }
+    settings.endArray();
 }
 
 QWidget* ProjectView::makeProjectCard(const ProjectEntry &project) {
@@ -242,7 +361,7 @@ QWidget* ProjectView::makeProjectCard(const ProjectEntry &project) {
     nameCol->setSpacing(2);
     auto *name = new QLabel(project.name);
     name->setStyleSheet(QString("font-size: 14px; font-weight: 900; color: %1; border: none;").arg(Style::INK));
-    auto *path = new QLabel(project.path);
+    auto *path = new QLabel(project.path.isEmpty() ? "Sin directorio" : project.path);
     path->setStyleSheet(QString("font-size: 11px; color: %1; font-family: 'Consolas','Courier New',monospace; border: none;").arg(Style::TEXT_MUTED));
     nameCol->addWidget(name);
     nameCol->addWidget(path);

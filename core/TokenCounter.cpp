@@ -57,32 +57,6 @@ static const QMap<QString, int>& catalog() {
     return c;
 }
 
-// ── Known model family prefixes for estimation ──
-static int familyDefault(const QString &modelId) {
-    QString m = modelId.toLower();
-    if (m.contains("gpt-4o"))     return 128000;
-    if (m.contains("gpt-4"))      return 8192;
-    if (m.contains("gpt-3.5"))    return 16385;
-    if (m.contains("claude"))     return 200000;
-    if (m.contains("gemini"))     return 1048576;
-    if (m.contains("qwen") && (m.contains("2.5") || m.contains("qwq"))) return 131072;
-    if (m.contains("qwen"))       return 32768;
-    if (m.contains("deepseek"))   return 128000;
-    if (m.contains("llama-3.3") || m.contains("llama-3.1")) return 131072;
-    if (m.contains("llama-3.2"))  return 131072;
-    if (m.contains("llama-3"))    return 8192;
-    if (m.contains("llama"))      return 4096;
-    if (m.contains("mistral") || m.contains("mixtral")) return 32768;
-    if (m.contains("mixtral"))    return 32768;
-    if (m.contains("gemma"))      return 8192;
-    if (m.contains("phi"))        return 4096;
-    if (m.contains("codellama"))  return 16384;
-    if (m.contains("starcoder"))  return 8192;
-    if (m.contains("yi-"))        return 32768;
-    if (m.contains("command-r"))  return 131072;
-    return 0;
-}
-
 // ── Public API ──
 
 TokenCountResult TokenCounter::estimateTokens(const QString &text) {
@@ -127,14 +101,16 @@ int TokenCounter::roughEstimate(const QString &text) {
 
 ContextWindowInfo TokenCounter::resolveContextWindow(const QString &modelId,
                                                       const QString &providerId,
-                                                      int userOverride)
+                                                      int userOverride,
+                                                      const QString &overrideSource)
 {
+    Q_UNUSED(providerId);
     ContextWindowInfo info;
 
     // Priority 1: user manual override
     if (userOverride > 0) {
         info.tokens = userOverride;
-        info.source = "user_manual";
+        info.source = overrideSource.isEmpty() ? "configured" : overrideSource;
         return info;
     }
 
@@ -148,39 +124,11 @@ ContextWindowInfo TokenCounter::resolveContextWindow(const QString &modelId,
         }
     }
 
-    // Priority 3: try prefix match in catalog
-    for (auto it = catalog().cbegin(); it != catalog().cend(); ++it) {
-        if (modelId.startsWith(it.key(), Qt::CaseInsensitive) ||
-            modelId.endsWith(it.key(), Qt::CaseInsensitive))
-        {
-            if (it.value() > 0) {
-                info.tokens = it.value();
-                info.source = "local_catalog";
-                return info;
-            }
-        }
-    }
-
-    // Priority 4: family-based default
-    int family = familyDefault(modelId);
-    if (family > 0) {
-        info.tokens = family;
-        info.source = "default_estimate";
-        return info;
-    }
-
-    // Priority 5: safe default based on provider
-    if (providerId == "lm_studio" || providerId == "ollama")
-        info.tokens = 8192;
-    else if (providerId == "groq")
-        info.tokens = 32768;
-    else if (providerId == "openrouter")
-        info.tokens = 32768;
-    else if (providerId == "gemini")
-        info.tokens = 1048576;
-    else
-        info.tokens = 32768;
-    info.source = "default_estimate";
+    // Never infer a context window from a model family or provider. If the
+    // exact model is not in the catalog and its API did not return metadata,
+    // the only honest value is unknown.
+    info.tokens = 0;
+    info.source = "unknown";
 
     return info;
 }

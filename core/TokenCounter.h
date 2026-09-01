@@ -21,7 +21,8 @@ public:
 
     static ContextWindowInfo resolveContextWindow(const QString &modelId,
                                                    const QString &providerId,
-                                                   int userOverride = 0);
+                                                   int userOverride = 0,
+                                                   const QString &overrideSource = QString());
 
     static const QMap<QString, int>& knownModelContexts();
 

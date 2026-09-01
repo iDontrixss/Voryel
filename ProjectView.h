@@ -25,18 +25,23 @@ public:
 
     void setProjects(const QVector<ProjectEntry> &projects);
     void setActiveProject(const QString &projectId);
+    QVector<ProjectEntry> projects() const { return m_projects; }
 
 signals:
-    void createProjectRequested();
     void projectOpened(const QString &projectId);
+    void projectsChanged();
 
 private:
     QVector<ProjectEntry> m_projects;
     QString m_activeProject;
+    bool m_creationVisible = false;
     QVBoxLayout *m_contentLayout = nullptr;
 
     void rebuild();
     QWidget* makeEmptyState();
+    QWidget* makeCreationCard();
     QWidget* makeProjectCard(const ProjectEntry &project);
     void clearLayout(QLayout *layout);
+    void loadProjects();
+    void saveProjects() const;
 };

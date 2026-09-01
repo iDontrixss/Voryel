@@ -1,6 +1,7 @@
 #include "PromptBuilder.h"
 #include <QDebug>
 #include <QStringList>
+#include <QRegularExpression>
 
 QString PromptBuilder::providerDisplayNameFromUrl(const QString &baseUrl) {
     QString url = baseUrl.toLower();
@@ -13,7 +14,9 @@ QString PromptBuilder::providerDisplayNameFromUrl(const QString &baseUrl) {
     if (url.contains("openrouter"))
         return "OpenRouter";
     if (url.contains("generativelanguage.googleapis.com"))
-        return "Gemini";
+        return "Google";
+    if (url.contains("api.anthropic.com"))
+        return "Anthropic";
     return "Custom";
 }
 
@@ -25,6 +28,8 @@ QString PromptBuilder::detectProviderId(const QString &baseUrl) {
         return "openrouter";
     if (url.contains("generativelanguage.googleapis.com"))
         return "gemini";
+    if (url.contains("api.anthropic.com"))
+        return "anthropic";
     if (url.contains("11434"))
         return "ollama";
     if (url.contains("127.0.0.1:1234") || url.contains("localhost:1234"))
@@ -127,6 +132,43 @@ QString PromptBuilder::sanitizeMessage(const QString &message) {
     QString s = message;
     s.replace("]]>", "]]]]><![CDATA[>");
     return s;
+}
+
+QString PromptBuilder::cleanModelResponse(const QString &response) {
+    QString withoutThinking;
+    int position = 0;
+    while (true) {
+        const int start = response.indexOf("<think>", position, Qt::CaseInsensitive);
+        if (start < 0) {
+            withoutThinking += response.mid(position);
+            break;
+        }
+        withoutThinking += response.mid(position, start - position);
+        const int end = response.indexOf("</think>", start + 7, Qt::CaseInsensitive);
+        if (end < 0) break;
+        position = end + 8;
+    }
+
+    QString result = withoutThinking.trimmed();
+    const QRegularExpression envelope(
+        QStringLiteral("<VORYEL_TASK\\b[^>]*>([\\s\\S]*?)</VORYEL_TASK>"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch envelopeMatch = envelope.match(result);
+    if (envelopeMatch.hasMatch())
+        result = envelopeMatch.captured(1).trimmed();
+
+    result.remove(QRegularExpression(
+        QStringLiteral("^\\s*result\\s*:\\s*"),
+        QRegularExpression::CaseInsensitiveOption));
+
+    const QRegularExpression cdata(
+        QStringLiteral("^\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch cdataMatch = cdata.match(result);
+    if (cdataMatch.hasMatch())
+        result = cdataMatch.captured(1);
+
+    return result.trimmed();
 }
 
 // ── Mode detection ──

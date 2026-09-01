@@ -10,7 +10,7 @@
 class QVBoxLayout;
 class QHBoxLayout;
 class QScrollArea;
-class QLineEdit;
+class QPlainTextEdit;
 class QPushButton;
 class QLabel;
 class ChatStore;
@@ -21,6 +21,8 @@ class QDragMoveEvent;
 class QDragLeaveEvent;
 class QDropEvent;
 class TokenRadialMeter;
+class ConversationMinimap;
+struct TokenUsage;
 
 class ChatView : public QWidget {
     Q_OBJECT
@@ -36,17 +38,19 @@ public:
     void setDemoMode(bool demo) { m_demoMode = demo; }
     bool isDemoMode() const { return m_demoMode; }
 
-    void beginStreaming();
+    void beginStreaming(const QStringList &attachments = QStringList());
     void appendStreamToken(const QString &token);
+    void appendReasoningSummary(const QString &summaryDelta);
+    void reportActivity(const QString &activity);
     void finishStreaming(const QString &fullResponse);
     void abortStream();
     void showErrorMessage(const QString &message);
 
     void refreshChatList();
     void loadChatMessages(int chatIndex);
-    void updateContextMeter(int currentTokens, int maxTokens,
+    void updateContextUsage(const TokenUsage &usage, qint64 contextLimit,
                             const QString &provider, const QString &model,
-                            const QString &accuracy,
+                            const QString &limitSource,
                             bool compactionPending = false);
 
 signals:
@@ -66,20 +70,27 @@ private:
     bool m_working = false;
     bool m_animationsEnabled = true;
     bool m_demoMode = false;
+    bool m_followLatest = true;
     int m_messageCount = 0;
     ChatStore *m_chatStore = nullptr;
 
     QScrollArea *m_scroll = nullptr;
+    ConversationMinimap *m_conversationMinimap = nullptr;
     QWidget *m_messagesContent = nullptr;
     QVBoxLayout *m_messagesLayout = nullptr;
     QWidget *m_emptyState = nullptr;
-    QLineEdit *m_input = nullptr;
+    QPlainTextEdit *m_input = nullptr;
     QWidget *m_inputBar = nullptr;
     QLabel *m_dropHintLabel = nullptr;
     QPushButton *m_attachButton = nullptr;
     QPushButton *m_sendButton = nullptr;
     QWidget *m_attachmentChipsWidget = nullptr;
     QHBoxLayout *m_attachmentChipsLayout = nullptr;
+    QWidget *m_pastedTextCard = nullptr;
+    QLabel *m_pastedTextInfo = nullptr;
+    QPushButton *m_restorePastedTextButton = nullptr;
+    QWidget *m_pasteRestoreUndoRow = nullptr;
+    QTimer *m_pasteRestoreUndoTimer = nullptr;
     QLabel *m_modelBadgeLabel = nullptr;
     TokenRadialMeter *m_contextMeter = nullptr;
     QLabel *m_headerTitle = nullptr;
@@ -88,6 +99,11 @@ private:
     QLabel *m_headerIcon = nullptr;
     QWidget *m_typingAvatarSlot = nullptr;
     QWidget *m_typingAvatar = nullptr;
+    QWidget *m_typingBubble = nullptr;
+    QWidget *m_thinkingDetails = nullptr;
+    QLabel *m_thinkingLine1 = nullptr;
+    QLabel *m_thinkingLine2 = nullptr;
+    QLabel *m_thinkingLine3 = nullptr;
     QPushButton *m_chatMenuButton = nullptr;
     QTimer *m_demoResponseTimer = nullptr;
     QPointer<QWidget> m_chatPopup;
@@ -95,12 +111,24 @@ private:
     QString m_pendingDeleteChatTitle;
 
     QString m_streamBuffer;
+    QString m_reasoningBuffer;
+    QStringList m_activityLog;
+    QString m_liveReasoningLine;
+    int m_embeddedReasoningLength = 0;
+    bool m_generationActivityShown = false;
+    bool m_receivingActivityShown = false;
     QStringList m_pendingAttachments;
+    QString m_pendingPastedText;
+    QString m_lastRestoredPastedText;
+    QString m_replacedTextBeforePasteRestore;
+    int m_pasteRestoreStart = -1;
 
     void buildUi();
     void setWorking(bool working, const QString &label = QString());
     void applyWorkingUi(bool working);
     void updateSendButton();
+    void updateComposerHeight();
+    void refreshThinkingActivity();
     void ensureConversationStarted();
     void scrollToBottom();
 
@@ -128,6 +156,12 @@ private:
     QString attachmentKindLabel(const QString &path) const;
     bool isCompatibleDropFile(const QString &path) const;
     void refreshAttachmentChips();
+    bool captureLargePaste(const QString &text);
+    void refreshPastedTextCard();
+    void restorePastedTextToComposer();
+    void undoPastedTextRestore();
+    void clearPastedTextRestoreUndo();
+    void addPastedTextMessageCard(const QString &text);
     void setDropTargetActive(bool active);
     void removePendingAttachment(int index);
 

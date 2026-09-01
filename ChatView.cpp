@@ -18,6 +18,18 @@
 #include <QUrl>
 #include <QDebug>
 #include <QPointer>
+#include <QTextDocument>
+#include <QTextCursor>
+#include <QTextDocumentFragment>
+#include <QTextBlock>
+#include <QTextLayout>
+#include <QPlainTextEdit>
+#include <QRegularExpression>
+#include <QKeyEvent>
+#include <QWheelEvent>
+#include <QAbstractTextDocumentLayout>
+#include <QPainter>
+#include <QLinearGradient>
 
 #include <QScrollArea>
 #include <QScrollBar>
@@ -25,9 +37,9 @@
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QLabel>
-#include <QLineEdit>
 #include <QPushButton>
 #include <QFrame>
+#include <QScreen>
 #include <QTimer>
 #include <QDateTime>
 #include <QLayoutItem>
@@ -39,8 +51,79 @@
 #include <QAbstractAnimation>
 #include <QObject>
 #include <functional>
+#include <limits>
+#include <numeric>
 
 namespace {
+
+constexpr int LARGE_PASTE_LINE_THRESHOLD = 250;
+constexpr int MAX_COMPOSER_PASTE_LINES = 600;
+const QString PASTED_TEXT_MARKER = QStringLiteral(
+    "\n\n--- TEXTO PEGADO POR EL USUARIO (CONTENIDO COMPLETO) ---\n");
+
+int textLineCount(const QString &text) {
+    if (text.isEmpty()) return 0;
+    int lines = text.count('\n') + 1;
+    if (text.endsWith('\n')) --lines;
+    return qMax(1, lines);
+}
+
+class ComposerEdit final : public QPlainTextEdit {
+public:
+    using QPlainTextEdit::QPlainTextEdit;
+    std::function<bool(const QString&)> largePasteHandler;
+
+    int visualLineCount(int lineWidth) const {
+        int lines = 0;
+        for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
+            const QString text = block.text();
+            if (text.isEmpty()) {
+                ++lines;
+                continue;
+            }
+
+            QTextLayout layout(text, font());
+            QTextOption option = document()->defaultTextOption();
+            option.setWrapMode(wordWrapMode());
+            layout.setTextOption(option);
+            layout.beginLayout();
+            int blockLines = 0;
+            while (true) {
+                QTextLine line = layout.createLine();
+                if (!line.isValid()) break;
+                line.setLineWidth(qMax(1, lineWidth));
+                ++blockLines;
+            }
+            layout.endLayout();
+            lines += qMax(1, blockLines);
+        }
+        return qMax(1, lines);
+    }
+
+protected:
+    void insertFromMimeData(const QMimeData *source) override {
+        if (source && source->hasText() && largePasteHandler
+            && largePasteHandler(source->text())) {
+            return;
+        }
+        QPlainTextEdit::insertFromMimeData(source);
+    }
+};
+
+class FadedBottomLabel final : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void paintEvent(QPaintEvent *event) override {
+        QLabel::paintEvent(event);
+        QPainter painter(this);
+        QLinearGradient fade(0, height() * 0.45, 0, height());
+        fade.setColorAt(0.0, QColor(255, 255, 255, 0));
+        fade.setColorAt(1.0, QColor(255, 255, 255, 245));
+        painter.fillRect(rect(), fade);
+    }
+};
 
 QLabel* iconLabel(const QString &iconRes, const QColor &tint, int size) {
     auto *lbl = new QLabel();
@@ -65,6 +148,264 @@ QLabel* textLabel(const QString &text, int px, const QString &color, int weight 
     lbl->setStyleSheet(QString("font-size: %1px; font-weight: %2; color: %3; border: none; background: transparent;")
                            .arg(px).arg(weight).arg(color));
     return lbl;
+}
+
+void configureMarkdownDocument(QTextDocument &document, const QString &markdown) {
+    document.setDefaultStyleSheet(QString(
+        "body { color: %1; font-size: 13px; line-height: 1.35; }"
+        "h1 { font-size: 19px; margin: 10px 0 6px 0; }"
+        "h2 { font-size: 17px; margin: 9px 0 5px 0; }"
+        "h3 { font-size: 15px; margin: 8px 0 4px 0; }"
+        "p { margin: 3px 0 7px 0; }"
+        "ul, ol { margin: 3px 0 7px 18px; }"
+        "li { margin: 2px 0; }"
+        "hr { border: none; border-top: 2px solid %2; margin: 9px 0; }"
+        "code { font-family: monospace; background: %3; color: %1; }"
+        "pre { font-family: monospace; background: %3; color: %1; border: 1px solid %2; "
+        "padding: 8px; margin: 7px 0; white-space: pre-wrap; }"
+        "table { border-collapse: collapse; margin: 7px 0; }"
+        "th { background: %3; font-weight: 700; }"
+        "th, td { border: 1px solid %2; padding: 4px 7px; }"
+        "blockquote { color: %4; border-left: 3px solid %5; margin: 7px 0; padding-left: 9px; }"
+        "a { color: %5; text-decoration: underline; }"
+    ).arg(Style::INK, Style::BORDER_SOFT, Style::BG_LILAC,
+          Style::TEXT_MUTED, Style::VIOLET));
+    const QTextDocument::MarkdownFeatures features =
+        QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub)
+        | QTextDocument::MarkdownNoHTML;
+    document.setMarkdown(markdown, features);
+}
+
+QString markdownToHtml(const QString &markdown) {
+    QTextDocument document;
+    configureMarkdownDocument(document, markdown);
+    return document.toHtml();
+}
+
+int markdownVisibleLength(const QString &markdown) {
+    QTextDocument document;
+    configureMarkdownDocument(document, markdown);
+    return qMax(0, document.characterCount() - 1);
+}
+
+QString markdownPrefixToHtml(const QString &markdown, int visibleCharacters) {
+    QTextDocument document;
+    configureMarkdownDocument(document, markdown);
+    const int length = qBound(0, visibleCharacters,
+                              qMax(0, document.characterCount() - 1));
+    QTextCursor cursor(&document);
+    cursor.setPosition(0);
+    cursor.setPosition(length, QTextCursor::KeepAnchor);
+    return cursor.selection().toHtml();
+}
+
+QWidget* makeCodeBlock(const QString &language, const QString &code, QWidget *parent,
+                       bool initiallyEmpty = false) {
+    auto *panel = new SolidPanel(parent);
+    panel->setFillColor(QColor("#f3edff"));
+    panel->setFullBorder(QColor(Style::INK), 2);
+    panel->setHardShadow(QColor(Style::INK), 3, 3);
+    panel->setCornerRadius(9);
+    panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+
+    auto *layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(10, 8, 10, 10);
+    layout->setSpacing(6);
+
+    auto *header = new QWidget(panel);
+    header->setStyleSheet("background: transparent; border: none;");
+    auto *headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+    headerLayout->setSpacing(8);
+
+    auto *languageLabel = new QLabel(language.trimmed().isEmpty()
+        ? QStringLiteral("Código") : language.trimmed());
+    languageLabel->setStyleSheet(QString(
+        "font-size: 10px; font-weight: 800; color: %1; border: none; background: transparent;"
+    ).arg(Style::TEXT_MUTED));
+    headerLayout->addWidget(languageLabel);
+    headerLayout->addStretch();
+
+    auto *copyButton = new QPushButton();
+    copyButton->setObjectName("assistantCodeCopy");
+    copyButton->setEnabled(!initiallyEmpty);
+    copyButton->setCursor(Qt::PointingHandCursor);
+    copyButton->setToolTip("Copiar bloque");
+    copyButton->setIcon(QIcon(":/icons/icons/copy.svg"));
+    copyButton->setIconSize(QSize(14, 14));
+    copyButton->setFixedSize(26, 26);
+    copyButton->setStyleSheet(QString(
+        "QPushButton { background: %1; color: %2; border: 1px solid #c4b5fd; border-radius: 6px; "
+        "padding: 0; }"
+        "QPushButton:hover { background: #e9ddff; }"
+        "QPushButton:disabled { color: #9ca3af; background: #f5f3ff; }"
+    ).arg(Style::WHITE, Style::INK));
+    QObject::connect(copyButton, &QPushButton::clicked, copyButton,
+        [copyButton, code]() {
+            QApplication::clipboard()->setText(code);
+            copyButton->setToolTip("Copiado");
+            copyButton->setIcon(QIcon(":/icons/icons/check-circle.svg"));
+            QTimer::singleShot(1400, copyButton, [copyButton]() {
+                copyButton->setToolTip("Copiar bloque");
+                copyButton->setIcon(QIcon(":/icons/icons/copy.svg"));
+            });
+        });
+    headerLayout->addWidget(copyButton);
+    layout->addWidget(header);
+
+    auto *editor = new QPlainTextEdit(panel);
+    editor->setObjectName("assistantCodeEditor");
+    editor->setPlainText(initiallyEmpty ? QString() : code);
+    editor->setReadOnly(true);
+    editor->setLineWrapMode(QPlainTextEdit::NoWrap);
+    editor->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+    editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    editor->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    editor->setStyleSheet(QString(
+        "QPlainTextEdit { background: #eee6ff; color: %1; border: none; border-radius: 6px; "
+        "padding: 7px; font-family: monospace; font-size: 12px; selection-background-color: #c4b5fd; }"
+        "QScrollBar:vertical { width: 8px; background: transparent; }"
+        "QScrollBar:horizontal { height: 8px; background: transparent; }"
+        "QScrollBar::handle { background: #c4b5fd; border-radius: 4px; min-width: 24px; min-height: 24px; }"
+    ).arg(Style::INK));
+    const int lines = qMax(1, code.count('\n') + 1);
+    editor->setFixedHeight(initiallyEmpty ? 42 : qBound(42, lines * 19 + 18, 900));
+    layout->addWidget(editor);
+    return panel;
+}
+
+struct AnimatedAssistantSegment {
+    enum class Kind { Markdown, Code };
+    Kind kind = Kind::Markdown;
+    QPointer<QWidget> container;
+    QPointer<QLabel> label;
+    QPointer<QPlainTextEdit> editor;
+    QString content;
+    int length = 0;
+};
+
+QString normalizeCopyablePayload(const QString &markdown) {
+    const QString trimmed = markdown.trimmed();
+    if (trimmed.contains("```")) return markdown;
+    if (trimmed.startsWith("<!DOCTYPE html", Qt::CaseInsensitive)
+        || trimmed.startsWith("<html", Qt::CaseInsensitive)) {
+        return "```html\n" + trimmed + "\n```";
+    }
+    return markdown;
+}
+
+QVector<AnimatedAssistantSegment> prepareAssistantAnimation(QLabel *label,
+                                                             const QString &markdown) {
+    QVector<AnimatedAssistantSegment> segments;
+    if (!label || !label->parentWidget()) return segments;
+    auto *layout = qobject_cast<QVBoxLayout*>(label->parentWidget()->layout());
+    if (!layout) return segments;
+
+    const QString normalized = normalizeCopyablePayload(markdown);
+    const QRegularExpression fence(
+        QStringLiteral("(?:^|\\n)```([^\\n`]*)\\n([\\s\\S]*?)(?:\\n```(?=\\n|$)|$)"));
+    QRegularExpressionMatchIterator matches = fence.globalMatch(normalized);
+    int sourcePosition = 0;
+    int insertPosition = layout->indexOf(label);
+    bool usedOriginalLabel = false;
+
+    auto addMarkdown = [&](const QString &source) {
+        const QString trimmed = source.trimmed();
+        if (trimmed.isEmpty()) return;
+        QLabel *segmentLabel = nullptr;
+        if (!usedOriginalLabel) {
+            segmentLabel = label;
+            usedOriginalLabel = true;
+        } else {
+            segmentLabel = textLabel(QString(), 13, Style::INK, 600);
+            layout->insertWidget(insertPosition, segmentLabel);
+        }
+        segmentLabel->clear();
+        segmentLabel->setTextFormat(Qt::RichText);
+        segmentLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
+        segmentLabel->setVisible(false);
+        segments.append({AnimatedAssistantSegment::Kind::Markdown,
+                         segmentLabel, segmentLabel, nullptr,
+                         trimmed, markdownVisibleLength(trimmed)});
+        ++insertPosition;
+    };
+
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        addMarkdown(normalized.mid(sourcePosition,
+                                 match.capturedStart() - sourcePosition));
+        const QString code = match.captured(2);
+        QWidget *block = makeCodeBlock(match.captured(1), code,
+                                       label->parentWidget(), true);
+        block->setVisible(false);
+        layout->insertWidget(insertPosition, block);
+        segments.append({AnimatedAssistantSegment::Kind::Code,
+                         block, nullptr,
+                         block->findChild<QPlainTextEdit*>("assistantCodeEditor"),
+                         code, static_cast<int>(code.size())});
+        ++insertPosition;
+        sourcePosition = match.capturedEnd();
+    }
+    addMarkdown(normalized.mid(sourcePosition));
+
+    if (!usedOriginalLabel)
+        label->hide();
+    return segments;
+}
+
+void renderAssistantMarkdown(QLabel *label, const QString &markdown) {
+    if (!label) return;
+    auto *layout = label->parentWidget()
+        ? qobject_cast<QVBoxLayout*>(label->parentWidget()->layout()) : nullptr;
+
+    const QString normalized = normalizeCopyablePayload(markdown);
+    const QRegularExpression fence(
+        QStringLiteral("(?:^|\\n)```([^\\n`]*)\\n([\\s\\S]*?)(?:\\n```(?=\\n|$)|$)"));
+    QRegularExpressionMatchIterator matches = fence.globalMatch(normalized);
+    if (layout && matches.hasNext()) {
+        int sourcePosition = 0;
+        int insertPosition = layout->indexOf(label);
+        bool usedOriginalLabel = false;
+
+        auto addMarkdownSegment = [&](const QString &segment) {
+            if (segment.trimmed().isEmpty()) return;
+            QLabel *segmentLabel = nullptr;
+            if (!usedOriginalLabel) {
+                segmentLabel = label;
+                usedOriginalLabel = true;
+            } else {
+                segmentLabel = textLabel(QString(), 13, Style::INK, 600);
+                segmentLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+            }
+            segmentLabel->setTextFormat(Qt::RichText);
+            segmentLabel->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
+            segmentLabel->setOpenExternalLinks(false);
+            segmentLabel->setText(markdownToHtml(segment.trimmed()));
+            if (layout->indexOf(segmentLabel) < 0)
+                layout->insertWidget(insertPosition, segmentLabel);
+            ++insertPosition;
+        };
+
+        matches = fence.globalMatch(normalized);
+        while (matches.hasNext()) {
+            const QRegularExpressionMatch match = matches.next();
+            addMarkdownSegment(normalized.mid(sourcePosition,
+                match.capturedStart() - sourcePosition));
+            layout->insertWidget(insertPosition,
+                makeCodeBlock(match.captured(1), match.captured(2), label->parentWidget()));
+            ++insertPosition;
+            sourcePosition = match.capturedEnd();
+        }
+        addMarkdownSegment(normalized.mid(sourcePosition));
+        if (!usedOriginalLabel)
+            label->hide();
+        return;
+    }
+
+    label->setTextFormat(Qt::RichText);
+    label->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
+    label->setOpenExternalLinks(false);
+    label->setText(markdownToHtml(normalized));
 }
 
 QWidget* statusDot(const QString &color, int size = 7) {
@@ -128,6 +469,240 @@ bool isPreviewImageFile(const QString &path) {
 
 } // namespace
 
+class ConversationMinimap final : public QWidget {
+public:
+    explicit ConversationMinimap(QScrollArea *scroll, QWidget *content,
+                                 QWidget *parent = nullptr)
+        : QWidget(parent), m_scroll(scroll), m_content(content) {
+        setFixedWidth(28);
+        setMouseTracking(true);
+        setCursor(Qt::PointingHandCursor);
+        setAttribute(Qt::WA_StyledBackground, true);
+        setStyleSheet(QString("background: %1; border: none;").arg(Style::BG_LILAC));
+
+        m_preview = new QWidget(this, Qt::ToolTip | Qt::FramelessWindowHint
+                                      | Qt::WindowStaysOnTopHint);
+        m_preview->setAttribute(Qt::WA_TranslucentBackground, true);
+        m_preview->setAttribute(Qt::WA_ShowWithoutActivating, true);
+        m_preview->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        auto *previewRoot = new QVBoxLayout(m_preview);
+        previewRoot->setContentsMargins(2, 2, 6, 6);
+        auto *panel = new SolidPanel(m_preview);
+        panel->setFillColor(QColor(Style::WHITE));
+        panel->setFullBorder(QColor(Style::INK), 2);
+        panel->setHardShadow(QColor(Style::INK), 4, 4);
+        panel->setCornerRadius(11);
+        panel->setFixedWidth(330);
+        auto *panelLayout = new QVBoxLayout(panel);
+        panelLayout->setContentsMargins(12, 10, 15, 13);
+        panelLayout->setSpacing(5);
+        m_previewUser = new QLabel(panel);
+        m_previewUser->setWordWrap(false);
+        m_previewUser->setStyleSheet(QString(
+            "font-size: 11px; font-weight: 800; color: %1; border: none; background: transparent;")
+            .arg(Style::INK));
+        m_previewAssistant = new QLabel(panel);
+        m_previewAssistant->setWordWrap(true);
+        m_previewAssistant->setMaximumHeight(38);
+        m_previewAssistant->setStyleSheet(QString(
+            "font-size: 11px; font-weight: 600; color: %1; border: none; background: transparent;")
+            .arg(Style::TEXT_MUTED));
+        panelLayout->addWidget(m_previewUser);
+        panelLayout->addWidget(m_previewAssistant);
+        previewRoot->addWidget(panel);
+        m_preview->hide();
+
+        if (m_scroll && m_scroll->verticalScrollBar()) {
+            connect(m_scroll->verticalScrollBar(), &QScrollBar::valueChanged,
+                    this, [this]() { update(); });
+            connect(m_scroll->verticalScrollBar(), &QScrollBar::rangeChanged,
+                    this, [this]() { update(); });
+        }
+    }
+
+    void clearEntries() {
+        m_entries.clear();
+        m_hovered = -1;
+        if (m_preview) m_preview->hide();
+        update();
+    }
+
+    void addUserTurn(QWidget *anchor, const QString &text) {
+        Entry entry;
+        entry.anchor = anchor;
+        entry.user = previewText(text, QStringLiteral("Mensaje del usuario"));
+        m_entries.append(entry);
+        update();
+    }
+
+    void attachAssistantResponse(QWidget *anchor, const QString &text) {
+        const QString response = previewText(text, QStringLiteral("Respuesta de Voryel"));
+        if (!m_entries.isEmpty() && m_entries.last().assistant.isEmpty()) {
+            m_entries.last().assistant = response;
+        } else {
+            Entry entry;
+            entry.anchor = anchor;
+            entry.user = QStringLiteral("Respuesta de Voryel");
+            entry.assistant = response;
+            m_entries.append(entry);
+        }
+        if (m_hovered >= 0) showPreview(m_hovered);
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const int active = activeEntry();
+        for (int i = 0; i < m_entries.size(); ++i) {
+            if (!m_entries[i].anchor) continue;
+            const int y = entryY(i);
+            const bool emphasized = i == active || i == m_hovered;
+            QPen pen(QColor(emphasized ? Style::VIOLET : Style::TEXT_FAINT));
+            pen.setWidth(emphasized ? 3 : 2);
+            pen.setCapStyle(Qt::RoundCap);
+            painter.setPen(pen);
+            const int halfWidth = emphasized ? 9 : 3;
+            painter.drawLine(width() / 2 - halfWidth, y,
+                             width() / 2 + halfWidth, y);
+        }
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override {
+        int nearest = -1;
+        int nearestDistance = height() + 1;
+        for (int i = 0; i < m_entries.size(); ++i) {
+            if (!m_entries[i].anchor) continue;
+            const int distance = qAbs(entryY(i) - event->position().y());
+            if (distance < nearestDistance) {
+                nearest = i;
+                nearestDistance = distance;
+            }
+        }
+        if (nearest != m_hovered) {
+            m_hovered = nearest;
+            if (m_hovered >= 0) showPreview(m_hovered);
+            else if (m_preview) m_preview->hide();
+            update();
+        } else if (nearest >= 0) {
+            positionPreview(nearest);
+        }
+        QWidget::mouseMoveEvent(event);
+    }
+
+    void mousePressEvent(QMouseEvent *event) override {
+        if (event->button() == Qt::LeftButton && m_hovered >= 0
+            && m_hovered < m_entries.size() && m_entries[m_hovered].anchor
+            && m_scroll && m_scroll->verticalScrollBar()) {
+            const int target = m_entries[m_hovered].anchor->y()
+                - m_scroll->viewport()->height() / 3;
+            m_scroll->verticalScrollBar()->setValue(qBound(
+                m_scroll->verticalScrollBar()->minimum(), target,
+                m_scroll->verticalScrollBar()->maximum()));
+        }
+        QWidget::mousePressEvent(event);
+    }
+
+    void leaveEvent(QEvent *event) override {
+        m_hovered = -1;
+        if (m_preview) m_preview->hide();
+        update();
+        QWidget::leaveEvent(event);
+    }
+
+private:
+    struct Entry {
+        QPointer<QWidget> anchor;
+        QString user;
+        QString assistant;
+    };
+
+    static QString previewText(QString text, const QString &fallback) {
+        text.remove(QRegularExpression(QStringLiteral("<VORYEL_TASK[\\s\\S]*?</VORYEL_TASK>"),
+                                       QRegularExpression::CaseInsensitiveOption));
+        text.replace(QRegularExpression(QStringLiteral("```[^\\n]*")), QString());
+        text.replace(QStringLiteral("```"), QString());
+        text.replace(QRegularExpression(QStringLiteral("[#*_>|`]+")), QStringLiteral(" "));
+        text.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+        text = text.trimmed();
+        return text.isEmpty() ? fallback : text;
+    }
+
+    int entryY(int index) const {
+        if (index < 0 || index >= m_entries.size() || !m_entries[index].anchor)
+            return height() / 2;
+        const int contentHeight = qMax(1, m_content ? m_content->height() : 1);
+        const qreal ratio = qBound(0.0,
+            (m_entries[index].anchor->y() + m_entries[index].anchor->height() * 0.5)
+                / qreal(contentHeight), 1.0);
+        return 10 + qRound(ratio * qMax(1, height() - 20));
+    }
+
+    int activeEntry() const {
+        if (!m_scroll || m_entries.isEmpty()) return -1;
+        const int center = m_scroll->verticalScrollBar()->value()
+            + m_scroll->viewport()->height() / 2;
+        int nearest = -1;
+        int distance = std::numeric_limits<int>::max();
+        for (int i = 0; i < m_entries.size(); ++i) {
+            if (!m_entries[i].anchor) continue;
+            const int candidate = qAbs(m_entries[i].anchor->y() - center);
+            if (candidate < distance) {
+                distance = candidate;
+                nearest = i;
+            }
+        }
+        return nearest;
+    }
+
+    void showPreview(int index) {
+        if (!m_preview || index < 0 || index >= m_entries.size()) return;
+        const Entry &entry = m_entries[index];
+        const QFontMetrics userMetrics(m_previewUser->font());
+        m_previewUser->setText(userMetrics.elidedText(entry.user, Qt::ElideRight, 296));
+        const QString response = entry.assistant.isEmpty()
+            ? QStringLiteral("Esperando la respuesta…") : entry.assistant;
+        const QFontMetrics assistantMetrics(m_previewAssistant->font());
+        const int lineWidth = 296;
+        QString first = assistantMetrics.elidedText(response, Qt::ElideRight, lineWidth);
+        QString remaining = response.mid(qMin(response.size(), first.size()));
+        if (remaining.trimmed().isEmpty()) {
+            m_previewAssistant->setText(first);
+        } else {
+            m_previewAssistant->setText(first + "\n"
+                + assistantMetrics.elidedText(remaining.trimmed(), Qt::ElideRight, lineWidth));
+        }
+        m_preview->adjustSize();
+        positionPreview(index);
+        m_preview->show();
+        m_preview->raise();
+    }
+
+    void positionPreview(int index) {
+        if (!m_preview || index < 0 || index >= m_entries.size()) return;
+        QPoint position = mapToGlobal(QPoint(-m_preview->width() - 8,
+                                             entryY(index) - m_preview->height() / 2));
+        QScreen *screen = QApplication::screenAt(mapToGlobal(rect().center()));
+        if (!screen) screen = QApplication::primaryScreen();
+        if (screen) {
+            const QRect available = screen->availableGeometry();
+            position.setX(qMax(available.left() + 8, position.x()));
+            position.setY(qBound(available.top() + 8, position.y(),
+                                 available.bottom() - m_preview->height() - 8));
+        }
+        m_preview->move(position);
+    }
+
+    QPointer<QScrollArea> m_scroll;
+    QPointer<QWidget> m_content;
+    QVector<Entry> m_entries;
+    QWidget *m_preview = nullptr;
+    QLabel *m_previewUser = nullptr;
+    QLabel *m_previewAssistant = nullptr;
+    int m_hovered = -1;
+};
+
 ChatView::ChatView(QWidget *parent) : QWidget(parent) {
     setAcceptDrops(true);
     buildUi();
@@ -163,7 +738,6 @@ void ChatView::buildUi() {
     titleCol->addWidget(m_headerSubtitle);
     headerLayout->addLayout(titleCol, 1);
 
-    // Context meter
     m_contextMeter = new TokenRadialMeter(header);
     headerLayout->addWidget(m_contextMeter, 0, Qt::AlignVCenter);
 
@@ -200,11 +774,20 @@ void ChatView::buildUi() {
     m_scroll->setWidgetResizable(true);
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scroll->setStyleSheet(Style::scrollAreaStyle());
     m_scroll->viewport()->setStyleSheet(QString("background: %1;").arg(Style::BG_LILAC));
+    m_scroll->viewport()->installEventFilter(this);
+    connect(m_scroll->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, [this](int value) {
+        if (!m_scroll || !m_scroll->verticalScrollBar()) return;
+        const QScrollBar *bar = m_scroll->verticalScrollBar();
+        m_followLatest = (bar->maximum() - value) <= 4;
+    });
 
     m_messagesContent = new QWidget();
     m_messagesContent->setStyleSheet(QString("background: %1;").arg(Style::BG_LILAC));
+    m_messagesContent->installEventFilter(this);
     m_messagesLayout = new QVBoxLayout(m_messagesContent);
     m_messagesLayout->setContentsMargins(24, 16, 24, 24);
     m_messagesLayout->setSpacing(8);
@@ -216,6 +799,9 @@ void ChatView::buildUi() {
 
     m_scroll->setWidget(m_messagesContent);
     middleLayout->addWidget(m_scroll, 1);
+    m_conversationMinimap = new ConversationMinimap(
+        m_scroll, m_messagesContent, middle);
+    middleLayout->addWidget(m_conversationMinimap, 0);
 
     root->addWidget(middle, 1);
 
@@ -251,29 +837,123 @@ void ChatView::buildUi() {
         "QPushButton:disabled { background: %4; }"
     ).arg(Style::BG_LILAC, Style::INK, Style::VIOLET_LIGHT, Style::BORDER_SOFT));
     connect(m_attachButton, &QPushButton::clicked, this, &ChatView::chooseAttachments);
-    inputRow->addWidget(m_attachButton);
+    inputRow->addWidget(m_attachButton, 0, Qt::AlignBottom);
 
-    m_input = new QLineEdit();
+    auto *composer = new ComposerEdit();
+    m_input = composer;
+    composer->largePasteHandler = [this](const QString &text) {
+        return captureLargePaste(text);
+    };
     m_input->setPlaceholderText("Pedile algo a Voryel...");
-    m_input->setMinimumHeight(42);
+    m_input->setFixedHeight(42);
+    m_input->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_input->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    m_input->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    m_input->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_input->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_input->setTabChangesFocus(false);
+    // Un pequeño margen interno evita que el primer glifo de cada línea
+    // envuelta quede contra el clip del viewport y pierda sus píxeles izquierdos.
+    m_input->document()->setDocumentMargin(3);
     m_input->setStyleSheet(QString(
-        "QLineEdit {"
+        "QPlainTextEdit {"
         "  background: %1; color: %2; border: 2px solid %3; border-radius: 12px;"
-        "  padding: 0 16px; font-size: 14px; font-weight: 600;"
+        "  padding: 10px 16px; font-size: 14px; font-weight: 600;"
         "}"
-        "QLineEdit:focus { border-color: %4; }"
+        "QPlainTextEdit:focus { border-color: %4; }"
+        "QScrollBar:vertical { background: transparent; width: 8px; margin: 8px 2px; }"
+        "QScrollBar::handle:vertical { background: #c4b5fd; border-radius: 4px; min-height: 24px; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
     ).arg(Style::BG_LILAC, Style::INK, Style::BORDER_SOFT, Style::VIOLET));
-    connect(m_input, &QLineEdit::returnPressed, this, &ChatView::handleSend);
-    inputRow->addWidget(m_input, 1);
+    m_input->installEventFilter(this);
+    connect(m_input, &QPlainTextEdit::textChanged, this, [this]() {
+        QTimer::singleShot(0, this, &ChatView::updateComposerHeight);
+    });
+    inputRow->addWidget(m_input, 1, Qt::AlignBottom);
 
     m_sendButton = new QPushButton();
     m_sendButton->setFixedSize(42, 42);
     m_sendButton->setCursor(Qt::PointingHandCursor);
     m_sendButton->setIconSize(QSize(18, 18));
     connect(m_sendButton, &QPushButton::clicked, this, &ChatView::handleSend);
-    inputRow->addWidget(m_sendButton);
+    inputRow->addWidget(m_sendButton, 0, Qt::AlignBottom);
     inputLayout->addLayout(inputRow);
     updateSendButton();
+
+    m_pastedTextCard = new SolidPanel(m_inputBar);
+    auto *pasteCard = static_cast<SolidPanel*>(m_pastedTextCard);
+    pasteCard->setFillColor(QColor("#f3edff"));
+    pasteCard->setCornerRadius(10);
+    pasteCard->setFullBorder(QColor(Style::INK), 2);
+    pasteCard->setHardShadow(QColor(Style::INK), 2, 2);
+    pasteCard->setVisible(false);
+    auto *pasteLayout = new QHBoxLayout(pasteCard);
+    pasteLayout->setContentsMargins(12, 8, 14, 10);
+    pasteLayout->setSpacing(9);
+    pasteLayout->addWidget(iconLabel(":/icons/icons/file-text.svg",
+                                     QColor(Style::VIOLET), 15));
+    auto *pasteTextColumn = new QVBoxLayout();
+    pasteTextColumn->setSpacing(1);
+    auto *pasteTitle = textLabel("Texto pegado", 12, Style::INK, 900);
+    pasteTextColumn->addWidget(pasteTitle);
+    m_pastedTextInfo = textLabel(QString(), 10, Style::TEXT_MUTED, 700);
+    pasteTextColumn->addWidget(m_pastedTextInfo);
+    pasteLayout->addLayout(pasteTextColumn, 1);
+
+    m_restorePastedTextButton = new QPushButton("Poner en el campo de texto");
+    m_restorePastedTextButton->setCursor(Qt::PointingHandCursor);
+    m_restorePastedTextButton->setMinimumHeight(26);
+    m_restorePastedTextButton->setStyleSheet(QString(
+        "QPushButton { background: %1; color: %2; border: 1.5px solid %2; border-radius: 7px;"
+        " padding: 3px 8px; font-size: 10px; font-weight: 800; }"
+        "QPushButton:hover { background: %3; }"
+        "QPushButton:disabled { color: %4; border-color: %4; background: %1; }"
+    ).arg(Style::WHITE, Style::INK, Style::VIOLET_LIGHT, Style::TEXT_FAINT));
+    connect(m_restorePastedTextButton, &QPushButton::clicked,
+            this, &ChatView::restorePastedTextToComposer);
+    pasteLayout->addWidget(m_restorePastedTextButton, 0, Qt::AlignVCenter);
+
+    auto *removePasteButton = new QPushButton();
+    removePasteButton->setFixedSize(24, 24);
+    removePasteButton->setCursor(Qt::PointingHandCursor);
+    removePasteButton->setToolTip("Quitar texto pegado");
+    removePasteButton->setIcon(IconUtil::coloredIcon(
+        ":/icons/icons/x.svg", QColor(Style::INK), QSize(12, 12)));
+    removePasteButton->setIconSize(QSize(12, 12));
+    removePasteButton->setStyleSheet(
+        "QPushButton { background: transparent; border: none; border-radius: 6px; }"
+        "QPushButton:hover { background: #fee2e2; }");
+    connect(removePasteButton, &QPushButton::clicked, this, [this]() {
+        m_pendingPastedText.clear();
+        refreshPastedTextCard();
+    });
+    pasteLayout->addWidget(removePasteButton, 0, Qt::AlignVCenter);
+    inputLayout->insertWidget(1, m_pastedTextCard);
+
+    m_pasteRestoreUndoRow = new QWidget(m_inputBar);
+    m_pasteRestoreUndoRow->setStyleSheet("background: transparent; border: none;");
+    m_pasteRestoreUndoRow->setVisible(false);
+    auto *undoLayout = new QHBoxLayout(m_pasteRestoreUndoRow);
+    undoLayout->setContentsMargins(0, 0, 2, 0);
+    undoLayout->setSpacing(0);
+    undoLayout->addStretch();
+    auto *undoButton = new QPushButton("↶  Deshacer");
+    undoButton->setCursor(Qt::PointingHandCursor);
+    undoButton->setMinimumHeight(27);
+    undoButton->setStyleSheet(QString(
+        "QPushButton { background: %1; color: %2; border: 2px solid %2; border-radius: 7px;"
+        " padding: 3px 10px; font-size: 10px; font-weight: 900; }"
+        "QPushButton:hover { background: %3; }"
+    ).arg(Style::WHITE, Style::INK, Style::VIOLET_LIGHT));
+    connect(undoButton, &QPushButton::clicked,
+            this, &ChatView::undoPastedTextRestore);
+    undoLayout->addWidget(undoButton);
+    inputLayout->insertWidget(2, m_pasteRestoreUndoRow);
+
+    m_pasteRestoreUndoTimer = new QTimer(this);
+    m_pasteRestoreUndoTimer->setSingleShot(true);
+    connect(m_pasteRestoreUndoTimer, &QTimer::timeout,
+            this, &ChatView::clearPastedTextRestoreUndo);
 
     m_attachmentChipsWidget = new QWidget(m_inputBar);
     m_attachmentChipsWidget->setStyleSheet("background: transparent; border: none;");
@@ -301,7 +981,7 @@ void ChatView::buildUi() {
             "QPushButton:hover { background: %4; border-color: %5; }"
         ).arg(Style::WHITE, Style::INK, Style::BORDER_SOFT, Style::BG_LILAC, Style::VIOLET));
         connect(chip, &QPushButton::clicked, this, [this, label = c.label]() {
-            m_input->setText(label);
+            m_input->setPlainText(label);
             m_input->setFocus();
         });
         chipsRow->addWidget(chip);
@@ -353,7 +1033,7 @@ void ChatView::bounceAvatarOnce() {
 
 void ChatView::setDraftPrompt(const QString &prompt) {
     if (!prompt.isEmpty() && m_input) {
-        m_input->setText(prompt);
+        m_input->setPlainText(prompt);
         m_input->setFocus();
     }
 }
@@ -379,8 +1059,9 @@ void ChatView::handleSend() {
         qWarning() << "ChatView::handleSend: m_input or m_messagesLayout is null";
         return;
     }
-    const QString text = m_input->text().trimmed();
-    if (text.isEmpty() && m_pendingAttachments.isEmpty()) {
+    const QString text = m_input->toPlainText().trimmed();
+    if (text.isEmpty() && m_pendingAttachments.isEmpty()
+        && m_pendingPastedText.isEmpty()) {
         qDebug() << "ChatView::handleSend: empty text and no attachments, returning";
         return;
     }
@@ -390,13 +1071,23 @@ void ChatView::handleSend() {
              << "m_demoMode =" << m_demoMode
              << "activeChatIndex =" << (m_chatStore ? m_chatStore->activeChatIndex() : -1);
 
+    clearPastedTextRestoreUndo();
     ensureConversationStarted();
+    m_followLatest = true;
     const QStringList attachments = m_pendingAttachments;
-    const QString outgoingText = text.isEmpty() ? "Archivos adjuntos" : text;
+    QString outgoingText = text;
+    if (!m_pendingPastedText.isEmpty()) {
+        if (outgoingText.isEmpty()) outgoingText = "Texto pegado";
+        outgoingText += PASTED_TEXT_MARKER + m_pendingPastedText;
+    } else if (outgoingText.isEmpty()) {
+        outgoingText = "Archivos adjuntos";
+    }
     addUserMessage(outgoingText, attachments);
     m_input->clear();
     m_pendingAttachments.clear();
+    m_pendingPastedText.clear();
     refreshAttachmentChips();
+    refreshPastedTextCard();
     emit messageSent(outgoingText, attachments);
 
     if (m_demoMode) {
@@ -477,19 +1168,35 @@ void ChatView::applyWorkingUi(bool working) {
             m_typingAvatar = slotAvatar;
             rowLayout->addWidget(avatarSlot, 0, Qt::AlignTop);
             auto *bubble = new QWidget();
+            bubble->setObjectName("typingActivityBubble");
+            bubble->setProperty("thinkingToggle", true);
+            bubble->setCursor(Qt::PointingHandCursor);
+            bubble->installEventFilter(this);
             bubble->setAttribute(Qt::WA_StyledBackground, true);
             bubble->setStyleSheet(QString(
-                "background: %1; border: 1px solid %2; border-radius: 12px;"
+                "QWidget#typingActivityBubble { background: %1; border: 1px solid %2; border-radius: 12px; }"
+                "QWidget#typingActivityBubble QWidget { background: transparent; border: none; }"
             ).arg(Style::WHITE, Style::BORDER_SOFT));
-            auto *bLayout = new QHBoxLayout(bubble);
-            bLayout->setContentsMargins(14, 10, 16, 13);
+            auto *bLayout = new QVBoxLayout(bubble);
+            bLayout->setContentsMargins(14, 10, 16, 12);
             bLayout->setSpacing(7);
-            auto makeDot = [](const QString &color, int size) -> QWidget* {
+            auto *dotsRow = new QWidget(bubble);
+            dotsRow->setProperty("thinkingToggle", true);
+            dotsRow->installEventFilter(this);
+            auto *dotsLayout = new QHBoxLayout(dotsRow);
+            dotsLayout->setContentsMargins(0, 0, 0, 0);
+            dotsLayout->setSpacing(7);
+            auto makeDot = [this](const QString &color, int size) -> QWidget* {
                 auto *c = new QWidget();
                 c->setFixedSize(size, size + 10);
+                c->setProperty("thinkingToggle", true);
+                c->setStyleSheet("background: transparent; border: none;");
+                c->installEventFilter(this);
                 auto *dot = new QLabel(c);
                 dot->setFixedSize(size, size);
                 dot->move(0, 5);
+                dot->setProperty("thinkingToggle", true);
+                dot->installEventFilter(this);
                 dot->setAttribute(Qt::WA_StyledBackground, true);
                 dot->setStyleSheet(QString("background: %1; border-radius: %2px; border: none;")
                                        .arg(color).arg(size / 2));
@@ -501,9 +1208,36 @@ void ChatView::applyWorkingUi(bool working) {
             auto *dot1 = container1->findChild<QLabel*>();
             auto *dot2 = container2->findChild<QLabel*>();
             auto *dot3 = container3->findChild<QLabel*>();
-            bLayout->addWidget(container1);
-            bLayout->addWidget(container2);
-            bLayout->addWidget(container3);
+            dotsLayout->addWidget(container1);
+            dotsLayout->addWidget(container2);
+            dotsLayout->addWidget(container3);
+            dotsLayout->addStretch();
+            bLayout->addWidget(dotsRow);
+
+            m_thinkingDetails = new QWidget(bubble);
+            m_thinkingDetails->setVisible(false);
+            auto *detailsLayout = new QVBoxLayout(m_thinkingDetails);
+            detailsLayout->setContentsMargins(0, 1, 0, 0);
+            detailsLayout->setSpacing(3);
+            m_thinkingLine1 = textLabel(QString(),
+                                        11, "#77717f", 650);
+            m_thinkingLine2 = textLabel(QString(),
+                                        11, "#85808d", 600);
+            m_thinkingLine3 = new FadedBottomLabel(
+                QString(), m_thinkingDetails);
+            m_thinkingLine3->setStyleSheet(
+                "font-size: 11px; font-weight: 600; color: #85808d; border: none; background: transparent;");
+            for (QLabel *line : {m_thinkingLine1, m_thinkingLine2, m_thinkingLine3}) {
+                line->setWordWrap(false);
+                line->setMinimumWidth(285);
+                detailsLayout->addWidget(line);
+            }
+            m_thinkingLine1->hide();
+            m_thinkingLine2->hide();
+            m_thinkingLine3->hide();
+            refreshThinkingActivity();
+            bLayout->addWidget(m_thinkingDetails);
+            m_typingBubble = bubble;
             rowLayout->addWidget(bubble, 0, Qt::AlignTop | Qt::AlignLeft);
             rowLayout->addStretch(1);
             m_typingRow = row;
@@ -533,6 +1267,11 @@ void ChatView::applyWorkingUi(bool working) {
             m_typingRow = nullptr;
             m_typingAvatarSlot = nullptr;
             m_typingAvatar = nullptr;
+            m_typingBubble = nullptr;
+            m_thinkingDetails = nullptr;
+            m_thinkingLine1 = nullptr;
+            m_thinkingLine2 = nullptr;
+            m_thinkingLine3 = nullptr;
         }
     }
     scrollToBottom();
@@ -559,7 +1298,54 @@ void ChatView::updateSendButton() {
     m_sendButton->setEnabled(true);
 }
 
+void ChatView::updateComposerHeight() {
+    if (!m_input || !m_input->document()) return;
+    auto *composer = static_cast<ComposerEdit*>(m_input);
+    const int lineHeight = QFontMetrics(m_input->font()).lineSpacing();
+    const int documentMargins = qCeil(m_input->document()->documentMargin() * 2.0);
+    const int layoutWidth = qMax(1, m_input->viewport()->width() - documentMargins);
+    const int visibleLines = composer->visualLineCount(layoutWidth);
+    const int chromeHeight = qMax(24, m_input->height() - m_input->viewport()->height());
+    const int minimumHeight = 42;
+    const int maximumVisibleLines = 10;
+    const int layoutSlack = 6;
+    const int maximumHeight = lineHeight * maximumVisibleLines + chromeHeight + layoutSlack;
+    const int contentHeight = lineHeight * visibleLines + chromeHeight + layoutSlack;
+    const int targetHeight = qBound(minimumHeight, contentHeight, maximumHeight);
+    if (m_input->height() != targetHeight)
+        m_input->setFixedHeight(targetHeight);
+    m_input->setVerticalScrollBarPolicy(
+        visibleLines > maximumVisibleLines ? Qt::ScrollBarAsNeeded
+                                           : Qt::ScrollBarAlwaysOff);
+    QTimer::singleShot(0, m_input, [input = m_input, visibleLines, maximumVisibleLines]() {
+        if (input->horizontalScrollBar())
+            input->horizontalScrollBar()->setValue(input->horizontalScrollBar()->minimum());
+        if (visibleLines <= maximumVisibleLines && input->verticalScrollBar())
+            input->verticalScrollBar()->setValue(0);
+        input->ensureCursorVisible();
+    });
+}
+
 void ChatView::addUserMessage(const QString &text, const QStringList &attachments) {
+    const int markerPosition = text.indexOf(PASTED_TEXT_MARKER);
+    if (markerPosition >= 0) {
+        const QString instruction = text.left(markerPosition).trimmed();
+        const QString pastedText = text.mid(markerPosition + PASTED_TEXT_MARKER.size());
+        if (!instruction.isEmpty() && instruction != "Texto pegado")
+            addMessageBubble(instruction, instruction, true, nullptr, QString(), attachments);
+        else if (!attachments.isEmpty())
+            addMessageBubble("Archivos adjuntos", "Archivos adjuntos", true,
+                             nullptr, QString(), attachments);
+        addPastedTextMessageCard(pastedText);
+        return;
+    }
+    if (textLineCount(text) >= LARGE_PASTE_LINE_THRESHOLD) {
+        if (!attachments.isEmpty())
+            addMessageBubble("Archivos adjuntos", "Archivos adjuntos", true,
+                             nullptr, QString(), attachments);
+        addPastedTextMessageCard(text);
+        return;
+    }
     addMessageBubble(text, text, true, nullptr, QString(), attachments);
 }
 void ChatView::addAssistantMessage(const QString &text) { addAssistantMessageAnimated(text); }
@@ -576,36 +1362,77 @@ void ChatView::addAssistantMessageAnimated(const QString &text, std::function<vo
         if (onFinished) onFinished();
         return;
     }
-
     emit taskStateChanged("Voryel está escribiendo");
 
-    auto *timer = new QTimer(this);
-    auto index = std::make_shared<int>(0);
-    const int chunk = text.size() > 120 ? 3 : 2;
-    QPointer<QLabel> safeLabel = contentLabel;
+    auto segments = std::make_shared<QVector<AnimatedAssistantSegment>>(
+        prepareAssistantAnimation(contentLabel, text));
+    if (segments->isEmpty()) {
+        renderAssistantMarkdown(contentLabel, text);
+        emit taskStateChanged("Respuesta lista");
+        if (onFinished) QTimer::singleShot(90, this, [onFinished]() { onFinished(); });
+        return;
+    }
 
-    connect(timer, &QTimer::timeout, this, [this, timer, index, text, safeLabel, onFinished, chunk]() mutable {
-        if (!safeLabel) {
+    auto *timer = new QTimer(this);
+    auto segmentIndex = std::make_shared<int>(0);
+    auto characterIndex = std::make_shared<int>(0);
+    const int totalLength = std::accumulate(segments->cbegin(), segments->cend(), 0,
+        [](int total, const AnimatedAssistantSegment &segment) {
+            return total + segment.length;
+        });
+    const int chunk = totalLength > 120 ? 3 : 2;
+
+    connect(timer, &QTimer::timeout, this,
+            [this, timer, segments, segmentIndex, characterIndex,
+             onFinished, chunk]() mutable {
+        while (*segmentIndex < segments->size()
+               && segments->at(*segmentIndex).length == 0) {
+            if (segments->at(*segmentIndex).container)
+                segments->at(*segmentIndex).container->show();
+            ++*segmentIndex;
+        }
+        if (*segmentIndex >= segments->size()) {
+            timer->stop();
+            timer->deleteLater();
+            emit taskStateChanged("Respuesta lista");
+            if (onFinished)
+                QTimer::singleShot(90, this, [onFinished]() { onFinished(); });
+            return;
+        }
+
+        AnimatedAssistantSegment &segment = (*segments)[*segmentIndex];
+        if (!segment.container) {
             timer->stop();
             timer->deleteLater();
             return;
         }
-        const int next = qMin(*index + chunk, text.size());
-        safeLabel->setText(text.left(next));
-        *index = next;
+        segment.container->show();
+        const int next = qMin(*characterIndex + chunk, segment.length);
+        if (segment.kind == AnimatedAssistantSegment::Kind::Markdown && segment.label) {
+            segment.label->setText(markdownPrefixToHtml(segment.content, next));
+        } else if (segment.kind == AnimatedAssistantSegment::Kind::Code && segment.editor) {
+            const QString visibleCode = segment.content.left(next);
+            segment.editor->setPlainText(visibleCode);
+            const int visibleLines = qMax(1, visibleCode.count('\n') + 1);
+            segment.editor->setFixedHeight(qBound(42, visibleLines * 19 + 18, 900));
+            QTextCursor cursor = segment.editor->textCursor();
+            cursor.movePosition(QTextCursor::End);
+            segment.editor->setTextCursor(cursor);
+        }
+        *characterIndex = next;
         scrollToBottom();
 
-        if (*index >= text.size()) {
-            timer->stop();
-            timer->deleteLater();
-            emit taskStateChanged("Respuesta lista");
-            if (onFinished) {
-                QTimer::singleShot(90, this, [onFinished]() { onFinished(); });
+        if (*characterIndex >= segment.length) {
+            if (segment.kind == AnimatedAssistantSegment::Kind::Code && segment.container) {
+                if (auto *button = segment.container->findChild<QPushButton*>("assistantCodeCopy"))
+                    button->setEnabled(true);
             }
+            ++*segmentIndex;
+            *characterIndex = 0;
         }
     });
 
-    timer->start(14);
+    timer->start(9);
     scrollToBottom();
 }
 
@@ -623,7 +1450,7 @@ QLabel* ChatView::addMessageBubble(const QString &sizingText, const QString &vis
     outer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
     auto *outerLayout = new QHBoxLayout(outer);
     outerLayout->setContentsMargins(0, 0, 0, 0);
-    outerLayout->setSpacing(9);
+    outerLayout->setSpacing(user ? 5 : 9);
 
     QLabel *contentLabel = nullptr;
     auto *bubble = makeBubble(sizingText, visibleText, user, &contentLabel, copyText);
@@ -633,6 +1460,8 @@ QLabel* ChatView::addMessageBubble(const QString &sizingText, const QString &vis
 
     auto *stack = new QWidget(outer);
     stack->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
+    if (user && attachments.isEmpty())
+        stack->setMaximumWidth(430);
     auto *stackLayout = new QVBoxLayout(stack);
     stackLayout->setContentsMargins(0, 0, 0, 0);
     stackLayout->setSpacing(2);
@@ -664,6 +1493,12 @@ QLabel* ChatView::addMessageBubble(const QString &sizingText, const QString &vis
     }
 
     m_messagesLayout->addWidget(outer, 0, Qt::AlignTop);
+    if (m_conversationMinimap) {
+        if (user)
+            m_conversationMinimap->addUserTurn(outer, sizingText);
+        else
+            m_conversationMinimap->attachAssistantResponse(outer, sizingText);
+    }
     fadeIn(outer);
 
     ++m_messageCount;
@@ -814,6 +1649,193 @@ void ChatView::refreshAttachmentChips() {
     m_attachmentChipsWidget->setVisible(true);
 }
 
+bool ChatView::captureLargePaste(const QString &text) {
+    if (textLineCount(text) < LARGE_PASTE_LINE_THRESHOLD)
+        return false;
+    if (!m_pendingPastedText.isEmpty())
+        m_pendingPastedText += '\n';
+    m_pendingPastedText += text;
+    refreshPastedTextCard();
+    return true;
+}
+
+void ChatView::refreshPastedTextCard() {
+    if (!m_pastedTextCard) return;
+    const bool visible = !m_pendingPastedText.isEmpty();
+    m_pastedTextCard->setVisible(visible);
+    if (!visible || !m_pastedTextInfo) return;
+    const int lines = textLineCount(m_pendingPastedText);
+    const qint64 bytes = m_pendingPastedText.toUtf8().size();
+    const QString size = bytes < 1024
+        ? QString::number(bytes) + " B"
+        : QString::number(double(bytes) / 1024.0, 'f', 1) + " KB";
+    const bool tooLongForComposer = lines > MAX_COMPOSER_PASTE_LINES;
+    if (tooLongForComposer) {
+        m_pastedTextInfo->setText(
+            QString("Demasiado largo para mostrarse en el campo de texto · %1 líneas · %2")
+                .arg(lines).arg(size));
+    } else {
+        m_pastedTextInfo->setText(QString("%1 líneas · %2 · se enviará completo")
+                                  .arg(lines).arg(size));
+    }
+    if (m_restorePastedTextButton) {
+        m_restorePastedTextButton->setEnabled(!tooLongForComposer);
+        m_restorePastedTextButton->setToolTip(tooLongForComposer
+            ? QString("El límite para mostrarlo es de %1 líneas; igualmente se enviará completo.")
+                  .arg(MAX_COMPOSER_PASTE_LINES)
+            : QString());
+    }
+}
+
+void ChatView::restorePastedTextToComposer() {
+    if (!m_input || m_pendingPastedText.isEmpty()) return;
+    if (textLineCount(m_pendingPastedText) > MAX_COMPOSER_PASTE_LINES) {
+        refreshPastedTextCard();
+        return;
+    }
+
+    clearPastedTextRestoreUndo();
+    QTextCursor cursor = m_input->textCursor();
+    const QString currentText = m_input->toPlainText();
+    m_pasteRestoreStart = cursor.selectionStart();
+    m_replacedTextBeforePasteRestore = currentText.mid(
+        cursor.selectionStart(), cursor.selectionEnd() - cursor.selectionStart());
+    m_lastRestoredPastedText = m_pendingPastedText;
+
+    cursor.insertText(m_lastRestoredPastedText);
+    m_input->setTextCursor(cursor);
+    m_pendingPastedText.clear();
+    refreshPastedTextCard();
+    if (m_pasteRestoreUndoRow) m_pasteRestoreUndoRow->setVisible(true);
+    if (m_pasteRestoreUndoTimer) m_pasteRestoreUndoTimer->start(5000);
+    m_input->setFocus();
+}
+
+void ChatView::undoPastedTextRestore() {
+    if (!m_input || m_lastRestoredPastedText.isEmpty()) {
+        clearPastedTextRestoreUndo();
+        return;
+    }
+
+    const QString restoredText = m_lastRestoredPastedText;
+    const QString currentText = m_input->toPlainText();
+    int actualStart = m_pasteRestoreStart;
+    if (actualStart < 0
+        || currentText.mid(actualStart, restoredText.size()) != restoredText) {
+        actualStart = currentText.indexOf(restoredText);
+    }
+
+    if (actualStart >= 0) {
+        QTextCursor cursor(m_input->document());
+        cursor.setPosition(actualStart);
+        cursor.setPosition(actualStart + restoredText.size(), QTextCursor::KeepAnchor);
+        cursor.insertText(m_replacedTextBeforePasteRestore);
+        m_input->setTextCursor(cursor);
+        if (m_pendingPastedText.isEmpty())
+            m_pendingPastedText = restoredText;
+        else
+            m_pendingPastedText = restoredText + '\n' + m_pendingPastedText;
+    }
+
+    clearPastedTextRestoreUndo();
+    refreshPastedTextCard();
+    m_input->setFocus();
+}
+
+void ChatView::clearPastedTextRestoreUndo() {
+    if (m_pasteRestoreUndoTimer) m_pasteRestoreUndoTimer->stop();
+    if (m_pasteRestoreUndoRow) m_pasteRestoreUndoRow->setVisible(false);
+    m_lastRestoredPastedText.clear();
+    m_replacedTextBeforePasteRestore.clear();
+    m_pasteRestoreStart = -1;
+}
+
+void ChatView::addPastedTextMessageCard(const QString &text) {
+    if (!m_messagesLayout || text.isEmpty()) return;
+    if (m_emptyState && m_emptyState->parent()) {
+        m_messagesLayout->removeWidget(m_emptyState);
+        m_emptyState->hide();
+    }
+
+    auto *card = new SolidPanel();
+    card->setFillColor(QColor(Style::VIOLET));
+    card->setCornerRadius(11);
+    card->setFullBorder(QColor(Style::INK), 2);
+    card->setHardShadow(QColor(Style::INK), 3, 3);
+    card->setMaximumWidth(430);
+    card->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
+
+    auto *cardLayout = new QHBoxLayout(card);
+    cardLayout->setContentsMargins(13, 10, 16, 13);
+    cardLayout->setSpacing(9);
+    cardLayout->addWidget(iconLabel(":/icons/icons/file-text.svg",
+                                    QColor(Style::WHITE), 15), 0, Qt::AlignTop);
+
+    auto *textColumn = new QVBoxLayout();
+    textColumn->setSpacing(2);
+    auto *title = textLabel("Texto pegado", 13, Style::WHITE, 900);
+    title->setWordWrap(false);
+    textColumn->addWidget(title);
+    const int lines = textLineCount(text);
+    const qint64 bytes = text.toUtf8().size();
+    const QString size = bytes < 1024
+        ? QString::number(bytes) + " B"
+        : QString::number(double(bytes) / 1024.0, 'f', 1) + " KB";
+    auto *details = textLabel(QString("%1 líneas · %2 · contenido completo")
+                              .arg(lines).arg(size), 10, "#ede9fe", 700);
+    details->setWordWrap(false);
+    textColumn->addWidget(details);
+    cardLayout->addLayout(textColumn, 1);
+
+    auto *copyButton = new QPushButton();
+    copyButton->setFixedSize(25, 25);
+    copyButton->setCursor(Qt::PointingHandCursor);
+    copyButton->setToolTip("Copiar texto pegado");
+    copyButton->setIcon(IconUtil::coloredIcon(
+        ":/icons/icons/copy.svg", QColor(Style::WHITE), QSize(13, 13)));
+    copyButton->setIconSize(QSize(13, 13));
+    copyButton->setStyleSheet(
+        "QPushButton { background: transparent; border: 1px solid #c4b5fd; border-radius: 6px; }"
+        "QPushButton:hover { background: #6d28d9; }");
+    connect(copyButton, &QPushButton::clicked, this, [copyButton, text]() {
+        QApplication::clipboard()->setText(text);
+        copyButton->setToolTip("Copiado");
+        copyButton->setIcon(QIcon(":/icons/icons/check-circle.svg"));
+        QTimer::singleShot(1400, copyButton, [copyButton]() {
+            copyButton->setToolTip("Copiar texto pegado");
+            copyButton->setIcon(QIcon(":/icons/icons/copy.svg"));
+        });
+    });
+    cardLayout->addWidget(copyButton, 0, Qt::AlignVCenter);
+
+    auto *stack = new QWidget();
+    stack->setMaximumWidth(430);
+    stack->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
+    auto *stackLayout = new QVBoxLayout(stack);
+    stackLayout->setContentsMargins(0, 0, 0, 0);
+    stackLayout->setSpacing(2);
+    stackLayout->addWidget(card, 0, Qt::AlignRight);
+    auto *time = new QLabel(QDateTime::currentDateTime().toString("hh:mm"));
+    time->setStyleSheet(QString(
+        "font-size: 10px; color: %1; border: none; background: transparent;")
+        .arg(Style::TEXT_FAINT));
+    stackLayout->addWidget(time, 0, Qt::AlignRight);
+
+    auto *outer = new QWidget();
+    outer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
+    auto *outerLayout = new QHBoxLayout(outer);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    outerLayout->setSpacing(5);
+    outerLayout->addStretch(1);
+    outerLayout->addWidget(stack, 0, Qt::AlignTop | Qt::AlignRight);
+    outerLayout->addWidget(makeAvatar(false), 0, Qt::AlignTop);
+    m_messagesLayout->addWidget(outer, 0, Qt::AlignTop);
+    if (m_conversationMinimap)
+        m_conversationMinimap->addUserTurn(outer, QStringLiteral("Texto pegado"));
+    ++m_messageCount;
+    scrollToBottom();
+}
+
 bool ChatView::isCompatibleDropFile(const QString &path) const {
     if (path.isEmpty()) return false;
     QFileInfo info(path);
@@ -898,26 +1920,42 @@ QWidget* ChatView::makeBubble(const QString &sizingText, const QString &visibleT
         bubble->setFullBorder(QColor(Style::INK), 2);
         bubble->setHardShadow(QColor(Style::INK), 3, 3);
     } else {
-        bubble->setFillColor(QColor(Style::WHITE));
-        bubble->setFullBorder(QColor(Style::INK), 2);
-        bubble->setHardShadow(QColor(Style::INK), 3, 3);
+        bubble->setFillColor(Qt::transparent);
+        bubble->setFullBorder(Qt::transparent, 0);
+        bubble->setHardShadow(Qt::transparent, 0, 0);
     }
     bubble->setCornerRadius(11);
-    bubble->setMaximumWidth(user ? 430 : 560);
+    bubble->setMaximumWidth(user ? 430 : 680);
     const int textLen = static_cast<int>(sizingText.size());
-    const int naturalWidth = qBound(user ? 120 : 220, textLen * 6 + 38, user ? 400 : 520);
+    const int naturalWidth = qBound(user ? 120 : 220, textLen * 6 + 38, user ? 400 : 640);
     bubble->setMinimumWidth(naturalWidth);
     bubble->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
     auto *layout = new QVBoxLayout(bubble);
-    layout->setContentsMargins(0, 0, 3, 3);
+    // Reserve the painted border and hard-shadow area. Without real layout
+    // margins, multiline labels can be measured against pixels that belong to
+    // the border, clipping the first or last row of glyphs.
+    layout->setContentsMargins(user ? 2 : 0, user ? 2 : 0,
+                               user ? 5 : 0, user ? 5 : 0);
     auto *inner = new QWidget(bubble);
     inner->setAttribute(Qt::WA_StyledBackground, true);
     inner->setStyleSheet("background: transparent; border: none;");
     auto *innerLayout = new QVBoxLayout(inner);
-    innerLayout->setContentsMargins(12, 7, 14, 8);
+    innerLayout->setContentsMargins(user ? 12 : 0, user ? 8 : 2,
+                                    user ? 14 : 2, user ? 9 : 2);
+    innerLayout->setSpacing(8);
     auto *lbl = textLabel(visibleText, 13, user ? Style::WHITE : Style::INK, 600);
+    if (user) {
+        lbl->setTextFormat(Qt::PlainText);
+        lbl->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        lbl->setMargin(2);
+        lbl->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+        lbl->setTextInteractionFlags(Qt::TextSelectableByMouse
+                                     | Qt::TextSelectableByKeyboard);
+    }
     if (contentLabel) *contentLabel = lbl;
     innerLayout->addWidget(lbl);
+    if (!user && !visibleText.isEmpty())
+        renderAssistantMarkdown(lbl, visibleText);
 
     if (!user) {
         auto *copyRow = new QHBoxLayout();
@@ -1001,7 +2039,7 @@ QWidget* ChatView::makeWelcomeState() {
             "QPushButton:hover { background: %4; border-color: %5; }"
         ).arg(Style::WHITE, Style::INK, Style::BORDER_SOFT, Style::BG_LILAC, Style::VIOLET));
         connect(chip, &QPushButton::clicked, this, [this, s = s.label]() {
-            m_input->setText(s);
+            m_input->setPlainText(s);
             m_input->setFocus();
         });
         chips->addWidget(chip);
@@ -1522,6 +2560,38 @@ void ChatView::rebuildChatList() {
 }
 
 bool ChatView::eventFilter(QObject *obj, QEvent *event) {
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto *widget = qobject_cast<QWidget*>(obj);
+        if (widget && widget->property("thinkingToggle").toBool()
+            && m_thinkingDetails) {
+            const auto *mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() == Qt::LeftButton) {
+                m_thinkingDetails->setVisible(!m_thinkingDetails->isVisible());
+                if (m_typingBubble) m_typingBubble->adjustSize();
+                scrollToBottom();
+                return true;
+            }
+        }
+    }
+    if ((obj == (m_scroll ? m_scroll->viewport() : nullptr)
+         || obj == m_messagesContent)
+        && event->type() == QEvent::Wheel) {
+        const auto *wheel = static_cast<QWheelEvent*>(event);
+        if (wheel->angleDelta().y() > 0 || wheel->pixelDelta().y() > 0)
+            m_followLatest = false;
+    }
+    if (obj == m_input) {
+        if (event->type() == QEvent::KeyPress) {
+            auto *key = static_cast<QKeyEvent*>(event);
+            const bool enter = key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter;
+            if (enter && !(key->modifiers() & Qt::ShiftModifier)) {
+                handleSend();
+                return true;
+            }
+        } else if (event->type() == QEvent::Resize) {
+            QTimer::singleShot(0, this, &ChatView::updateComposerHeight);
+        }
+    }
     if (event->type() == QEvent::MouseButtonPress) {
         auto *widget = qobject_cast<QWidget*>(obj);
         if (widget && widget->property("chatIndex").isValid()) {
@@ -1625,19 +2695,21 @@ void ChatView::clearMessages() {
         delete item;
     }
     m_messageCount = 0;
+    if (m_conversationMinimap)
+        m_conversationMinimap->clearEntries();
     m_emptyState = makeWelcomeState();
     m_messagesLayout->addStretch(1);
     m_messagesLayout->addWidget(m_emptyState, 0, Qt::AlignCenter);
     m_messagesLayout->addStretch(1);
 }
 
-void ChatView::updateContextMeter(int currentTokens, int maxTokens,
-                                   const QString &provider, const QString &model,
-                                   const QString &accuracy,
-                                   bool compactionPending)
-{
+void ChatView::updateContextUsage(const TokenUsage &usage, qint64 contextLimit,
+                                  const QString &provider, const QString &model,
+                                  const QString &limitSource,
+                                  bool compactionPending) {
     if (m_contextMeter)
-        m_contextMeter->setValue(currentTokens, maxTokens, provider, model, accuracy, compactionPending);
+        m_contextMeter->setUsage(usage, contextLimit, provider, model,
+                                 limitSource, compactionPending);
 }
 
 void ChatView::loadChatMessages(int chatIndex) {
@@ -1646,6 +2718,7 @@ void ChatView::loadChatMessages(int chatIndex) {
     const auto &chats = m_chatStore->chats();
     if (chatIndex < 0 || chatIndex >= chats.size()) return;
 
+    m_followLatest = true;
     clearMessages();
 
     const auto &msgs = chats[chatIndex].messages;
@@ -1717,7 +2790,7 @@ void ChatView::dropEvent(QDropEvent *event) {
 
 void ChatView::scrollToBottom() {
     auto doScroll = [this]() {
-        if (m_scroll && m_scroll->verticalScrollBar()) {
+        if (m_followLatest && m_scroll && m_scroll->verticalScrollBar()) {
             m_scroll->verticalScrollBar()->setValue(m_scroll->verticalScrollBar()->maximum());
         }
     };
@@ -1731,15 +2804,125 @@ void ChatView::scrollToBottom() {
 // Cuando el stream termina, finishStreaming() muestra la respuesta
 // completa con la animación de escritura/letra por letra.
 
-void ChatView::beginStreaming() {
+void ChatView::beginStreaming(const QStringList &attachments) {
     qDebug() << "ChatView::beginStreaming: clearing buffer, previous length =" << m_streamBuffer.length();
     m_streamBuffer.clear();
+    m_reasoningBuffer.clear();
+    m_activityLog.clear();
+    m_liveReasoningLine.clear();
+    m_embeddedReasoningLength = 0;
+    m_generationActivityShown = false;
+    m_receivingActivityShown = false;
     if (!m_working)
         applyWorkingUi(true);
+    reportActivity(QStringLiteral("Historial leído y contexto preparado"));
+    if (!attachments.isEmpty()) {
+        QStringList names;
+        for (const QString &path : attachments)
+            names.append(QFileInfo(path).fileName());
+        const QString files = names.size() <= 2
+            ? names.join(QStringLiteral(" y "))
+            : QStringLiteral("%1 archivos adjuntos").arg(names.size());
+        reportActivity(QStringLiteral("Incluyendo %1 en la solicitud").arg(files));
+    }
+}
+
+void ChatView::reportActivity(const QString &activity) {
+    QString clean = activity.simplified();
+    if (clean.isEmpty()) return;
+    if (m_activityLog.isEmpty() || m_activityLog.last() != clean)
+        m_activityLog.append(clean);
+    while (m_activityLog.size() > 8)
+        m_activityLog.removeFirst();
+    refreshThinkingActivity();
+}
+
+void ChatView::refreshThinkingActivity() {
+    if (!m_thinkingLine1 || !m_thinkingLine2 || !m_thinkingLine3) return;
+    QStringList visible = m_activityLog;
+    if (!m_liveReasoningLine.isEmpty())
+        visible.append(m_liveReasoningLine);
+    visible = visible.mid(qMax(0, visible.size() - 3));
+
+    const QList<QLabel*> labels = {m_thinkingLine1, m_thinkingLine2, m_thinkingLine3};
+    for (int i = 0; i < labels.size(); ++i) {
+        if (i >= visible.size()) {
+            labels[i]->hide();
+            continue;
+        }
+        QString line = visible[i];
+        if (line.size() > 115) line = line.left(112).trimmed() + QStringLiteral("…");
+        labels[i]->setText(line);
+        labels[i]->show();
+    }
+    if (m_typingBubble) m_typingBubble->adjustSize();
+}
+
+void ChatView::appendReasoningSummary(const QString &summaryDelta) {
+    if (summaryDelta.isEmpty()) return;
+    m_reasoningBuffer += summaryDelta;
+    if (m_reasoningBuffer.size() > 12000)
+        m_reasoningBuffer = m_reasoningBuffer.right(12000);
+    if (!m_thinkingLine1 || !m_thinkingLine2 || !m_thinkingLine3) return;
+
+    QString visible = m_reasoningBuffer;
+    visible.replace(QRegularExpression(QStringLiteral("```[^\\n]*")), QString());
+    visible.replace(QStringLiteral("```"), QString());
+    visible.replace(QRegularExpression(QStringLiteral("[#*_>`]+")), QStringLiteral(" "));
+    visible.replace('\r', '\n');
+
+    QStringList steps;
+    const QStringList candidates = visible.split(
+        QRegularExpression(QStringLiteral("(?:\\n+|(?<=[.!?])\\s+)")),
+        Qt::SkipEmptyParts);
+    for (QString candidate : candidates) {
+        candidate.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+        candidate = candidate.trimmed();
+        if (!candidate.isEmpty()) steps.append(candidate);
+    }
+    if (steps.isEmpty()) return;
+
+    if (!m_activityLog.contains(QStringLiteral("El modelo está razonando")))
+        reportActivity(QStringLiteral("El modelo está razonando"));
+    m_liveReasoningLine = QStringLiteral("Razonamiento: ") + steps.last();
+    refreshThinkingActivity();
 }
 
 void ChatView::appendStreamToken(const QString &token) {
     m_streamBuffer += token;
+    // Algunos servidores locales envían el razonamiento dentro de <think>
+    // en lugar de usar un campo estructurado. Se muestra mientras llega, pero
+    // PromptBuilder lo elimina de la respuesta final destinada al chat.
+    QRegularExpression expression(
+        QStringLiteral("<think\\b[^>]*>([\\s\\S]*?)(?:</think>|$)"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (m_reasoningBuffer.isEmpty() || m_embeddedReasoningLength > 0) {
+        QString embedded;
+        auto matches = expression.globalMatch(m_streamBuffer);
+        while (matches.hasNext())
+            embedded += matches.next().captured(1);
+        if (embedded.size() > m_embeddedReasoningLength) {
+            const QString delta = embedded.mid(m_embeddedReasoningLength);
+            m_embeddedReasoningLength = embedded.size();
+            appendReasoningSummary(delta);
+        }
+    }
+
+    QString answerProbe = m_streamBuffer;
+    answerProbe.remove(expression);
+    const QString trimmedProbe = answerProbe.trimmed();
+    const bool partialThinkTag = trimmedProbe.startsWith('<')
+        && QStringLiteral("<think>").startsWith(trimmedProbe, Qt::CaseInsensitive);
+    const bool hasAnswerContent = !trimmedProbe.isEmpty() && !partialThinkTag;
+    if (hasAnswerContent && !m_generationActivityShown) {
+        m_generationActivityShown = true;
+        m_liveReasoningLine.clear();
+        reportActivity(QStringLiteral("El modelo está generando la respuesta"));
+    } else if (hasAnswerContent && !m_receivingActivityShown
+               && answerProbe.size() >= 160) {
+        m_receivingActivityShown = true;
+        reportActivity(QStringLiteral("Recibiendo y organizando la respuesta"));
+    }
 }
 
 void ChatView::finishStreaming(const QString &fullResponse) {

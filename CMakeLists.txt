@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Network Multimedia)
 
 # En Windows embebemos un manifest que declara DPI-awareness (PerMonitorV2).
 # Sin esto, Windows reescala la ventana como si fuera una imagen en pantallas
@@ -21,10 +21,12 @@ endif()
 add_executable(Voryel
     main.cpp
     IconUtil.cpp
+    ProviderIconResolver.cpp
     SoundUtil.cpp
     SolidPanel.cpp
     Sidebar.cpp
     ToggleSwitch.cpp
+    VoryelDialog.cpp
     TitleBar.cpp
     BottomBar.cpp
     DashboardView.cpp
@@ -44,7 +46,8 @@ add_executable(Voryel
     ${PLATFORM_SOURCES}
 )
 
-target_link_libraries(Voryel PRIVATE Qt6::Widgets Qt6::Svg Qt6::Network winmm)
+target_link_libraries(Voryel PRIVATE Qt6::Widgets Qt6::Svg Qt6::Network Qt6::Multimedia)
+
 if (WIN32)
     target_link_libraries(Voryel PRIVATE crypt32)
 endif()

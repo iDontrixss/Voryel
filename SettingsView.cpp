@@ -2,6 +2,8 @@
 #include "Style.h"
 #include "SolidPanel.h"
 #include "IconUtil.h"
+#include "ProviderIconResolver.h"
+#include "VoryelDialog.h"
 #include "model/ProviderUrlSecurity.h"
 
 #include <QScrollArea>
@@ -30,6 +32,9 @@
 #include <QSettings>
 #include <QTimer>
 #include <QDebug>
+#include <QUrl>
+#include <QUuid>
+#include <QRegularExpression>
 #include <functional>
 
 #if defined(Q_OS_WIN)
@@ -57,6 +62,18 @@ QLabel* makeIcon(const QString &iconRes, const QColor &tint, int size = 15) {
     return label;
 }
 
+QLabel* makeProviderIcon(const QString &identity, int size = 15) {
+    const QString path = ProviderIconResolver::iconPath(identity);
+    if (path.isEmpty())
+        return makeIcon(":/icons/icons/cpu.svg", QColor(Style::VIOLET), size);
+    auto *label = new QLabel();
+    label->setFixedSize(size, size);
+    label->setAlignment(Qt::AlignCenter);
+    label->setPixmap(ProviderIconResolver::normalizedPixmap(identity, size));
+    label->setStyleSheet("border: none; background: transparent;");
+    return label;
+}
+
 QLabel* makeDot(const QString &color, int size = 8) {
     auto *dot = new QLabel();
     dot->setAttribute(Qt::WA_StyledBackground, true);
@@ -80,9 +97,38 @@ static QString presetBaseUrl(const QString &providerId) {
         { "groq",       "https://api.groq.com/openai/v1" },
         { "openai",     "https://api.openai.com/v1" },
         { "deepseek",   "https://api.deepseek.com/v1" },
+        { "gemini",     "https://generativelanguage.googleapis.com/v1beta" },
+        { "anthropic",  "https://api.anthropic.com/v1" },
+        { "opencode_zen", "https://opencode.ai/zen/v1" },
+        { "opencode_go",  "https://opencode.ai/zen/go/v1" },
+        { "mistral",      "https://api.mistral.ai/v1" },
         { "ollama",     "http://127.0.0.1:11434/v1" },
     };
     return presets.value(providerId);
+}
+
+QString normalizedProviderBaseUrl(QString url) {
+    url = url.trimmed();
+    while (url.endsWith('/')) url.chop(1);
+    return url;
+}
+
+bool isValidProviderBaseUrl(const QString &baseUrl) {
+    const QUrl url(baseUrl);
+    const QString scheme = url.scheme().toLower();
+    return url.isValid() && !url.host().isEmpty()
+        && (scheme == "http" || scheme == "https");
+}
+
+bool isLocalProviderBaseUrl(const QString &baseUrl) {
+    const QString host = QUrl(baseUrl).host().toLower();
+    return host == "localhost" || host == "127.0.0.1" || host == "::1";
+}
+
+QString normalizedProviderHint(QString value) {
+    value = value.toLower();
+    value.remove(QRegularExpression("[^a-z0-9]"));
+    return value;
 }
 
 QString protectSecret(const QString &plainText) {
@@ -168,8 +214,35 @@ static QString classifyAvailability(const QString &providerId, const QString &mo
     if (providerId == "deepseek")
         return "Costo seg\u00FAn proveedor";
 
+    if (providerId == "opencode_zen")
+        return "Costo según modelo";
+    if (providerId == "opencode_go")
+        return "Suscripción";
+    if (providerId == "mistral")
+        return "Pago";
+
     // Custom / fallback: no pricing info
     return "No informado";
+}
+
+int contextWindowFromModelMetadata(const QJsonObject &model) {
+    const QStringList keys = {
+        "context_length", "contextWindow", "context_window",
+        "max_context_length", "max_context_tokens", "context_size",
+        "n_ctx", "num_ctx", "input_token_limit", "max_input_tokens",
+        "inputTokenLimit", "contextWindowTokens"
+    };
+    for (const QString &key : keys) {
+        const QJsonValue value = model.value(key);
+        if (value.isDouble() && value.toDouble() > 0)
+            return static_cast<int>(value.toDouble());
+        if (value.isString()) {
+            bool ok = false;
+            const int parsed = value.toString().toInt(&ok);
+            if (ok && parsed > 0) return parsed;
+        }
+    }
+    return 0;
 }
 
 } // namespace
@@ -183,8 +256,11 @@ SettingsView::SettingsView(QWidget *parent) : QWidget(parent) {
         { "groq",       "Groq",       "Cloud",    "Inferencia rápida gratis con API key.",          false, true,  false, false, "", "" },
         { "openai",     "OpenAI",     "Cloud",    "Modelos GPT-4o, GPT-4, etc.",                    false, true,  false, false, "", "" },
         { "deepseek",   "DeepSeek",   "Cloud",    "Modelo razonador R1 y V3.",                      false, true,  false, false, "", "" },
-        { "gemini",     "Gemini",     "Cloud",    "Modelos de Google. Integración futura.",         false, true,  true,  false, "", "" },
-        { "claude",     "Claude",     "Cloud",    "Modelos de Anthropic. Integración futura.",      false, true,  true,  false, "", "" },
+        { "gemini",     "Google",     "Cloud",    "Modelos Gemini mediante Google AI Studio.",       false, true,  false, false, "", "" },
+        { "anthropic",  "Anthropic",  "Cloud",    "Modelos Claude mediante la API de Anthropic.",    false, true,  false, false, "", "" },
+        { "opencode_zen", "OpenCode Zen", "Cloud", "Gateway de modelos seleccionados por OpenCode.", false, true, false, false, "", "" },
+        { "opencode_go",  "OpenCode Go",  "Cloud", "Plan de modelos de código de bajo costo.",        false, true, false, false, "", "" },
+        { "mistral",      "Mistral AI",   "Cloud", "Modelos Mistral mediante su API oficial.",        false, true, false, false, "", "" },
     };
 
     loadSettings();
@@ -192,12 +268,33 @@ SettingsView::SettingsView(QWidget *parent) : QWidget(parent) {
     if (!m_activeModelId.isEmpty()) {
         const int activeProviderIndex = providerIndexById(m_activeProviderId);
         if (activeProviderIndex >= 0) {
+            if (!ensureQuickModel(m_activeProviderId, m_activeModelId,
+                                  m_activeModelContextWindow)
+                && !m_quickModels.isEmpty()) {
+                m_activeProviderId = m_quickModels.first().providerId;
+                m_activeModelId = m_quickModels.first().modelId;
+                m_activeModelContextWindow = m_quickModels.first().contextWindowTokens;
+                m_activeModelContextSource = m_quickModels.first().contextWindowSource;
+            }
+            for (const auto &entry : m_quickModels) {
+                if (entry.providerId == m_activeProviderId
+                    && entry.modelId == m_activeModelId) {
+                    m_activeModelContextWindow = entry.contextWindowTokens;
+                    m_activeModelContextSource = entry.contextWindowSource;
+                    break;
+                }
+            }
             QString display = prettyModelName(m_activeModelId);
             if (display.isEmpty()) display = m_activeModelId;
-            m_activeModel = m_providers[activeProviderIndex].displayName + " · " + display;
+            const int reconciledProviderIndex = providerIndexById(m_activeProviderId);
+            m_activeModel = (reconciledProviderIndex >= 0
+                ? m_providers[reconciledProviderIndex].displayName : m_activeProviderId)
+                + " · " + display;
         }
     }
+    saveSettings();
     buildUi();
+    QTimer::singleShot(0, this, &SettingsView::fetchModelsDevCatalog);
 }
 
 void SettingsView::buildUi() {
@@ -227,6 +324,7 @@ void SettingsView::buildUi() {
     // more room on desktop/fullscreen. This uses the horizontal space without
     // moving sections into a different two-column layout.
     content->setMaximumWidth(1080);
+    content->setMinimumWidth(660);
     content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     content->setStyleSheet(QString("background: %1;").arg(Style::BG_LILAC));
 
@@ -306,8 +404,9 @@ QWidget* SettingsView::makeModelsSection() {
     activeLayout->addWidget(activeDot, 0, Qt::AlignVCenter);
     QString activeDisplay = m_activeModel.isEmpty() || m_activeModel == "Sin modelo"
         ? "Sin modelo activo" : m_activeModel;
-    auto *activeLabel = makeText(activeDisplay, 14, Style::INK, 900);
-    activeLayout->addWidget(activeLabel, 1);
+    m_activeModelLabel = makeText(activeDisplay, 14, Style::INK, 900);
+    m_activeModelLabel->setWordWrap(false);
+    activeLayout->addWidget(m_activeModelLabel, 1);
     activeLayout->addWidget(makeText("Activo", 11, Style::GREEN, 950));
     layout->addWidget(activeCard);
 
@@ -322,7 +421,7 @@ QWidget* SettingsView::makeModelsSection() {
 
     // Add model button
     auto *addBtn = makeGhostButton("+ Agregar modelo");
-    connect(addBtn, &QPushButton::clicked, this, [this, layout]() {
+    connect(addBtn, &QPushButton::clicked, this, [this]() {
         if (m_addModelPanel) {
             closeAddModelPanel();
         }
@@ -330,11 +429,18 @@ QWidget* SettingsView::makeModelsSection() {
             emit statusMessageRequested("Máximo 5 modelos de acceso rápido.");
             return;
         }
-        auto *dlg = makeAddModelDialog();
-        if (dlg) {
-            layout->addWidget(dlg);
-            m_addModelPanel = dlg;
-            QApplication::instance()->installEventFilter(this);
+        auto *content = makeAddModelDialog();
+        if (content) {
+            auto *dialog = new VoryelDialog("Agregar modelo", this);
+            dialog->setMinimumSize(720, 580);
+            dialog->resize(780, 660);
+            dialog->bodyLayout()->addWidget(content);
+            m_addModelPanel = dialog;
+            connect(dialog, &QDialog::finished, this, [this, dialog]() {
+                if (m_addModelPanel == dialog) m_addModelPanel = nullptr;
+                dialog->deleteLater();
+            });
+            dialog->open();
         }
     });
     layout->addWidget(addBtn);
@@ -344,10 +450,10 @@ QWidget* SettingsView::makeModelsSection() {
 
 void SettingsView::closeAddModelPanel() {
     if (m_addModelPanel) {
-        QApplication::instance()->removeEventFilter(this);
-        m_addModelPanel->setEnabled(false);
-        m_addModelPanel->deleteLater();
+        QWidget *panel = m_addModelPanel;
         m_addModelPanel = nullptr;
+        if (auto *dialog = qobject_cast<QDialog*>(panel)) dialog->reject();
+        else panel->deleteLater();
     }
 }
 
@@ -402,11 +508,15 @@ QWidget* SettingsView::makeQuickModelRow(int idx) {
     rowLayout->setContentsMargins(14, 10, 14, 10);
     rowLayout->setSpacing(10);
 
-    rowLayout->addWidget(makeIcon(":/icons/icons/cpu.svg", QColor(Style::VIOLET), 13), 0, Qt::AlignVCenter);
+    rowLayout->addWidget(makeProviderIcon(qm.providerName + " · " + qm.modelId, 18),
+                         0, Qt::AlignVCenter);
     QString display = qm.displayName.isEmpty() ? prettyModelName(qm.modelId) : qm.displayName;
     if (display.isEmpty()) display = qm.modelId;
     QString label = qm.providerName + " · " + display;
-    rowLayout->addWidget(makeText(label, 13, Style::INK, 850), 1);
+    auto *modelLabel = makeText(label, 13, Style::INK, 850);
+    modelLabel->setWordWrap(false);
+    modelLabel->setToolTip(label);
+    rowLayout->addWidget(modelLabel, 1);
 
     // Availability badge
     if (!qm.availability.isEmpty()) {
@@ -436,8 +546,11 @@ QWidget* SettingsView::makeQuickModelRow(int idx) {
         connect(useBtn, &QPushButton::clicked, this, [this, qm]() {
             m_activeProviderId = qm.providerId;
             m_activeModelId = qm.modelId;
+            m_activeModelContextWindow = qm.contextWindowTokens;
+            m_activeModelContextSource = qm.contextWindowSource;
             setActiveModelFromProvider();
             saveSettings();
+            QTimer::singleShot(0, this, &SettingsView::refreshModelsList);
             emit activeModelChanged(m_activeProviderId, m_activeModelId);
             emit providerConfigChanged();
             emit statusMessageRequested("Modelo activo: " + qm.providerName + " · " + qm.modelId);
@@ -494,15 +607,12 @@ QWidget* SettingsView::makeAddModelDialog() {
         return nullptr;
     }
 
-    auto *card = new SolidPanel();
-    card->setFillColor(QColor(Style::WHITE));
-    card->setCornerRadius(12);
-    card->setFullBorder(QColor(Style::INK), 2);
-    card->setHardShadow(QColor(Style::INK), 2, 2);
+    auto *card = new QWidget();
+    card->setStyleSheet("background: transparent; border: none;");
     card->setProperty("addModelPanel", true);
 
     auto *layout = new QVBoxLayout(card);
-    layout->setContentsMargins(16, 14, 16, 14);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(10);
 
     layout->addWidget(makeText("Agregar modelo", 14, Style::INK, 900));
@@ -511,23 +621,92 @@ QWidget* SettingsView::makeAddModelDialog() {
     auto *providerLabel = makeText("Proveedor:", 12, Style::TEXT_MUTED, 800);
     layout->addWidget(providerLabel);
 
-    auto *providerCombo = new QComboBox();
+    // Keep a hidden QComboBox as the selection model, but render the selector
+    // inside the dialog. Native combo popups create a separate rectangular
+    // window and break the neobrutalist frame on several window managers.
+    auto *providerCombo = new QComboBox(card);
     for (int idx : configuredProviders) {
         providerCombo->addItem(m_providers[idx].displayName, idx);
     }
-    // Combo style with explicit dropdown styling (fixes dark dropdown)
-    providerCombo->setStyleSheet(QString(
-        "QComboBox { background: %1; color: %2; border: 2px solid %3; border-radius: 8px;"
-        "  padding: 6px 10px; font-size: 12px; font-weight: 700; }"
-        "QComboBox::drop-down { border: none; width: 24px; }"
-        "QComboBox::down-arrow { image: none; }"
-        "QComboBox QAbstractItemView {"
-        "  background: %4; color: %2; border: 2px solid %3; border-radius: 4px;"
-        "  selection-background-color: %5; selection-color: %2;"
-        "  outline: none;"
-        "}"
-    ).arg(Style::BG_LILAC, Style::INK, Style::INK, Style::WHITE, Style::VIOLET_LIGHT));
-    layout->addWidget(providerCombo);
+    providerCombo->setVisible(false);
+
+    auto *providerSelector = new QPushButton(providerCombo->currentText() + "  ▾");
+    providerSelector->setCursor(Qt::PointingHandCursor);
+    providerSelector->setMinimumHeight(36);
+    providerSelector->setStyleSheet(QString(
+        "QPushButton { background: white; color: %1; border: 2px solid %1; border-radius: 9px;"
+        " padding: 6px 11px; text-align: left; font-size: 12px; font-weight: 800; }"
+        "QPushButton:hover { background: %2; }"
+    ).arg(Style::INK, Style::VIOLET_LIGHT));
+    layout->addWidget(providerSelector);
+
+    auto *providerList = new SolidPanel(card);
+    providerList->setFillColor(QColor(Style::WHITE));
+    providerList->setCornerRadius(9);
+    providerList->setFullBorder(QColor(Style::INK), 2);
+    providerList->setHardShadow(QColor(Style::INK), 2, 2);
+    providerList->setVisible(false);
+    auto *providerListLayout = new QVBoxLayout(providerList);
+    providerListLayout->setContentsMargins(5, 5, 7, 7);
+    providerListLayout->setSpacing(0);
+    auto *providerOptionsScroll = new QScrollArea(providerList);
+    providerOptionsScroll->setWidgetResizable(true);
+    providerOptionsScroll->setFrameShape(QFrame::NoFrame);
+    providerOptionsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    providerOptionsScroll->setMaximumHeight(qMin(220, providerCombo->count() * 35 + 4));
+    providerOptionsScroll->setStyleSheet(
+        "QScrollArea, QScrollArea::viewport { background: transparent; border: none; }"
+        "QScrollBar:vertical { background: transparent; width: 7px; }"
+        "QScrollBar::handle:vertical { background: #c4a7ef; border-radius: 3px; min-height: 24px; }"
+    );
+    auto *providerOptions = new QWidget();
+    providerOptions->setStyleSheet("background: transparent; border: none;");
+    auto *providerOptionsLayout = new QVBoxLayout(providerOptions);
+    providerOptionsLayout->setContentsMargins(0, 0, 0, 0);
+    providerOptionsLayout->setSpacing(3);
+    for (int comboIndex = 0; comboIndex < providerCombo->count(); ++comboIndex) {
+        auto *providerOption = new QPushButton(providerCombo->itemText(comboIndex));
+        providerOption->setProperty("providerComboIndex", comboIndex);
+        providerOption->setCursor(Qt::PointingHandCursor);
+        providerOption->setMinimumHeight(32);
+        providerOption->setStyleSheet(QString(
+            "QPushButton { background: %1; color: %2; border: none; border-radius: 6px;"
+            " padding: 5px 9px; text-align: left; font-size: 12px; font-weight: 750; }"
+            "QPushButton:hover { background: %3; }"
+        ).arg(comboIndex == 0 ? Style::VIOLET_LIGHT : Style::WHITE,
+              Style::INK, Style::VIOLET_LIGHT));
+        connect(providerOption, &QPushButton::clicked, this,
+                [providerCombo, providerList, comboIndex]() {
+            providerCombo->setCurrentIndex(comboIndex);
+            providerList->setVisible(false);
+        });
+        providerOptionsLayout->addWidget(providerOption);
+    }
+    providerOptionsScroll->setWidget(providerOptions);
+    providerListLayout->addWidget(providerOptionsScroll);
+    layout->addWidget(providerList);
+    connect(providerSelector, &QPushButton::clicked, this,
+            [providerSelector, providerList]() {
+        const bool show = !providerList->isVisible();
+        providerList->setVisible(show);
+        QString text = providerSelector->text();
+        text.chop(3);
+        providerSelector->setText(text + (show ? "  ▴" : "  ▾"));
+    });
+    connect(providerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [providerCombo, providerSelector, providerList](int currentIndex) {
+        providerSelector->setText(providerCombo->currentText() + "  ▾");
+        const auto options = providerList->findChildren<QPushButton*>();
+        for (QPushButton *option : options) {
+            const bool active = option->property("providerComboIndex").toInt() == currentIndex;
+            option->setStyleSheet(QString(
+                "QPushButton { background: %1; color: %2; border: none; border-radius: 6px;"
+                " padding: 5px 9px; text-align: left; font-size: 12px; font-weight: 750; }"
+                "QPushButton:hover { background: %3; }"
+            ).arg(active ? Style::VIOLET_LIGHT : Style::WHITE,
+                  Style::INK, Style::VIOLET_LIGHT));
+        }
+    });
 
     // ── Model detection area ──
     auto *detectArea = new QWidget();
@@ -586,7 +765,7 @@ QWidget* SettingsView::makeAddModelDialog() {
 
     // ── When provider changes, fetch models ──
     auto onProviderChanged = [this, providerCombo, resultLayout, loadingLabel, errorLabel,
-                              manualLabel, modelIdEdit, addModelBtn, card]() {
+                              manualLabel, modelIdEdit, addModelBtn]() {
         int pi = providerCombo->currentData().toInt();
         if (pi < 0 || pi >= m_providers.size()) return;
         const auto &prov = m_providers[pi];
@@ -679,6 +858,107 @@ QWidget* SettingsView::makeAddModelDialog() {
     return card;
 }
 
+void SettingsView::fetchModelsDevCatalog() {
+    if (m_modelsDevRequested) return;
+    m_modelsDevRequested = true;
+    if (!m_networkManager)
+        m_networkManager = new QNetworkAccessManager(this);
+
+    QNetworkRequest request(QUrl("https://models.dev/api.json"));
+    request.setRawHeader("Accept", "application/json");
+    request.setRawHeader("User-Agent", "Voryel/1.0");
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) return;
+        QJsonParseError error;
+        const QJsonDocument document = QJsonDocument::fromJson(reply->readAll(), &error);
+        if (error.error != QJsonParseError::NoError || !document.isObject()) return;
+
+        const QJsonObject root = document.object();
+        for (auto providerIt = root.constBegin(); providerIt != root.constEnd(); ++providerIt) {
+            const QString providerId = providerIt.key().toLower();
+            const QJsonObject provider = providerIt.value().toObject();
+            m_modelsDevProviderNames[providerId] = provider.value("name").toString();
+            m_modelsDevProviderApis[providerId] = provider.value("api").toString();
+            const QJsonObject models = provider.value("models").toObject();
+            for (auto modelIt = models.constBegin(); modelIt != models.constEnd(); ++modelIt) {
+                const int context = static_cast<int>(modelIt.value().toObject()
+                    .value("limit").toObject().value("context").toDouble());
+                if (context > 0)
+                    m_modelsDevContexts[providerId + '\n' + modelIt.key()] = context;
+            }
+        }
+
+        bool changed = false;
+        for (auto &entry : m_quickModels) {
+            if (entry.contextWindowTokens > 0) continue;
+            const int providerIndex = providerIndexById(entry.providerId);
+            if (providerIndex < 0) continue;
+            const int context = modelsDevContextFor(m_providers[providerIndex], entry.modelId);
+            if (context <= 0) continue;
+            entry.contextWindowTokens = context;
+            entry.contextWindowSource = "models.dev";
+            if (entry.providerId == m_activeProviderId && entry.modelId == m_activeModelId)
+                m_activeModelContextWindow = context;
+            if (entry.providerId == m_activeProviderId && entry.modelId == m_activeModelId)
+                m_activeModelContextSource = entry.contextWindowSource;
+            changed = true;
+        }
+        if (changed) {
+            saveSettings();
+            refreshModelsList();
+            emit providerConfigChanged();
+        }
+    });
+}
+
+int SettingsView::modelsDevContextFor(const ProviderDef &provider,
+                                      const QString &modelId) const {
+    if (modelId.isEmpty() || m_modelsDevContexts.isEmpty()) return 0;
+    const QString providerIdHint = normalizedProviderHint(provider.id.section('_', 0, 0));
+    const QString providerNameHint = normalizedProviderHint(provider.displayName);
+    const QString providerHost = QUrl(provider.baseUrl).host().toLower();
+
+    QStringList matchingProviders;
+    for (auto it = m_modelsDevProviderNames.constBegin();
+         it != m_modelsDevProviderNames.constEnd(); ++it) {
+        const QString catalogId = it.key();
+        const QString normalizedId = normalizedProviderHint(catalogId);
+        const QString normalizedName = normalizedProviderHint(it.value());
+        const QString catalogHost = QUrl(m_modelsDevProviderApis.value(catalogId)).host().toLower();
+        const bool idMatch = !providerIdHint.isEmpty()
+            && (providerIdHint == normalizedId || providerIdHint.contains(normalizedId));
+        const bool nameMatch = !providerNameHint.isEmpty()
+            && (providerNameHint == normalizedId || providerNameHint.contains(normalizedId)
+                || (!normalizedName.isEmpty()
+                    && (providerNameHint == normalizedName
+                        || providerNameHint.contains(normalizedName))));
+        const bool hostMatch = !providerHost.isEmpty() && !catalogHost.isEmpty()
+            && providerHost == catalogHost;
+        if (idMatch || nameMatch || hostMatch)
+            matchingProviders.append(catalogId);
+    }
+
+    for (const QString &catalogProvider : matchingProviders) {
+        const int context = m_modelsDevContexts.value(
+            catalogProvider + '\n' + modelId, 0);
+        if (context > 0) return context;
+    }
+
+    // A custom OpenAI-compatible endpoint may expose a canonical model ID
+    // without sharing the original provider name. Accept a global match only
+    // when every exact occurrence agrees on the same limit.
+    int uniqueContext = 0;
+    const QString suffix = '\n' + modelId;
+    for (auto it = m_modelsDevContexts.constBegin(); it != m_modelsDevContexts.constEnd(); ++it) {
+        if (!it.key().endsWith(suffix)) continue;
+        if (uniqueContext == 0) uniqueContext = it.value();
+        else if (uniqueContext != it.value()) return 0;
+    }
+    return uniqueContext;
+}
+
 void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVBoxLayout *resultLayout, QWidget *loadingLabel) {
     if (providerIdx < 0 || providerIdx >= m_providers.size()) return;
     const auto &prov = m_providers[providerIdx];
@@ -692,10 +972,9 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
         return;
     }
 
-    // Ensure trailing slash is correct for /models endpoint
-    if (!baseUrl.endsWith("/v1") && !baseUrl.endsWith("/v1/")) {
-        baseUrl += "/v1";
-    }
+    // The configured URL is the OpenAI-compatible API root. Respect custom
+    // paths instead of assuming that every provider exposes them under /v1.
+    baseUrl = normalizedProviderBaseUrl(baseUrl);
 
     if (!m_networkManager) {
         m_networkManager = new QNetworkAccessManager(this);
@@ -711,7 +990,12 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
     QNetworkRequest request(url);
     request.setRawHeader("Accept", "application/json");
     request.setRawHeader("User-Agent", "Voryel/1.0");
-    if (!prov.apiKey.isEmpty()) {
+    if (prov.id == "anthropic") {
+        request.setRawHeader("anthropic-version", "2023-06-01");
+        if (!prov.apiKey.isEmpty()) request.setRawHeader("x-api-key", prov.apiKey.toUtf8());
+    } else if (prov.id == "gemini") {
+        if (!prov.apiKey.isEmpty()) request.setRawHeader("x-goog-api-key", prov.apiKey.toUtf8());
+    } else if (!prov.apiKey.isEmpty()) {
         request.setRawHeader("Authorization", ("Bearer " + prov.apiKey).toUtf8());
     }
 
@@ -729,6 +1013,12 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
     connect(reply, &QNetworkReply::finished, this, [this, reply, resultLayout, loadingLabel, combo, ctx]() {
         reply->deleteLater();
         if (!m_addModelPanel) {
+            delete ctx;
+            return;
+        }
+        // Ignore a late response from the provider that was selected before
+        // the user switched the inline selector.
+        if (!combo || combo->currentData().toInt() != ctx->providerIdx) {
             delete ctx;
             return;
         }
@@ -772,6 +1062,8 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
 
         QJsonObject obj = doc.object();
         QJsonArray modelsArray = obj["data"].toArray();
+        if (ctx->providerId == "gemini")
+            modelsArray = obj["models"].toArray();
         if (modelsArray.isEmpty()) {
             auto *errMsg = makeText("No se encontraron modelos. Usá el modo manual.", 11, "#e53935", 700);
             resultLayout->addWidget(errMsg);
@@ -784,12 +1076,16 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
             QString id;
             QString displayName;
             QString availability; // classified badge text
+            int contextWindowTokens = 0;
         };
         QVector<DetectedModel> models;
 
         for (const auto &mVal : modelsArray) {
             QJsonObject mObj = mVal.toObject();
             QString id = mObj["id"].toString();
+            if (id.isEmpty() && ctx->providerId == "gemini")
+                id = mObj["name"].toString();
+            if (id.startsWith("models/")) id.remove(0, 7);
             if (id.isEmpty()) continue;
 
             QJsonObject pricing = mObj["pricing"].toObject();
@@ -798,8 +1094,15 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
 
             DetectedModel dm;
             dm.id = id;
-            dm.displayName = prettyModelName(id);
+            dm.displayName = mObj["displayName"].toString();
+            if (dm.displayName.isEmpty()) dm.displayName = prettyModelName(id);
             dm.availability = classifyAvailability(provId, id, promptPrice, completionPrice);
+            dm.contextWindowTokens = contextWindowFromModelMetadata(mObj);
+            if (dm.contextWindowTokens <= 0
+                && ctx->providerIdx >= 0 && ctx->providerIdx < m_providers.size()) {
+                dm.contextWindowTokens = modelsDevContextFor(
+                    m_providers[ctx->providerIdx], id);
+            }
             models.append(dm);
         }
 
@@ -815,7 +1118,8 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
         modelScroll->setWidgetResizable(true);
         modelScroll->setFrameShape(QFrame::NoFrame);
         modelScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        modelScroll->setMaximumHeight(220);
+        modelScroll->setMinimumHeight(300);
+        modelScroll->setMaximumHeight(390);
         modelScroll->setStyleSheet(
             "QScrollArea { background: transparent; border: 1px solid #e4dff2; border-radius: 6px; }"
             "QScrollArea::viewport { background: transparent; }"
@@ -904,7 +1208,8 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
             QString modelId = dm.id;
             QString displayName = dm.displayName;
             QString availability = dm.availability;
-            connect(addRowBtn, &QPushButton::clicked, this, [this, provId, provName, modelId, displayName, availability]() {
+            const int contextWindowTokens = dm.contextWindowTokens;
+            connect(addRowBtn, &QPushButton::clicked, this, [this, provId, provName, modelId, displayName, availability, contextWindowTokens]() {
 
                 // Validate provider configured
                 int pi = -1;
@@ -947,11 +1252,15 @@ void SettingsView::fetchModelsForProvider(int providerIdx, QComboBox *combo, QVB
                 qm.modelId = modelId;
                 qm.displayName = displayName;
                 qm.availability = availability;
+                qm.contextWindowTokens = contextWindowTokens;
+                qm.contextWindowSource = contextWindowTokens > 0 ? "provider" : QString();
                 m_quickModels.append(qm);
 
                 if (m_activeModelId.isEmpty()) {
                     m_activeProviderId = provId;
                     m_activeModelId = modelId;
+                    m_activeModelContextWindow = contextWindowTokens;
+                    m_activeModelContextSource = qm.contextWindowSource;
                     setActiveModelFromProvider();
                     emit activeModelChanged(m_activeProviderId, m_activeModelId);
                 }
@@ -1144,7 +1453,9 @@ SolidPanel* SettingsView::makePermissionCard(const QString &id, const QString &l
     auto *top = new QHBoxLayout();
     top->setSpacing(8);
     top->addWidget(makeIcon(iconRes, QColor(id == "free" ? "#d97706" : Style::VIOLET), 14), 0, Qt::AlignVCenter);
-    top->addWidget(makeText(label, 13, Style::INK, 950), 1);
+    auto *title = makeText(label, 13, Style::INK, 950);
+    title->setWordWrap(false);
+    top->addWidget(title, 1);
     auto *check = makeIcon(":/icons/icons/check-circle.svg", QColor(Style::VIOLET), 12);
     check->setProperty("checkPermissionFor", id);
     check->setVisible(id == m_permissionMode);
@@ -1200,7 +1511,7 @@ QWidget* SettingsView::makeAppearanceSection() {
     layout->addWidget(gridWrap);
 
     layout->addWidget(makeToggleRow("Animaciones suaves", &m_animCheck, true));
-    layout->addWidget(makeToggleRow("Sonidos cortos al terminar tareas", &m_soundCheck, true));
+    layout->addWidget(makeToggleRow("Sonidos de actividad, finalización y error", &m_soundCheck, true));
     if (m_animCheck) connect(m_animCheck, &ToggleSwitch::toggled, this, &SettingsView::settingsChanged);
     if (m_soundCheck) connect(m_soundCheck, &ToggleSwitch::toggled, this, &SettingsView::settingsChanged);
     return section;
@@ -1369,6 +1680,15 @@ void SettingsView::choosePermission(const QString &modeId) {
 void SettingsView::setActiveModel(const QString &model) {
     if (model.isEmpty()) return;
     m_activeModel = model;
+    updateActiveModelLabel();
+}
+
+void SettingsView::updateActiveModelLabel() {
+    if (!m_activeModelLabel) return;
+    const QString text = m_activeModel.isEmpty() || m_activeModel == "Sin modelo"
+        ? QStringLiteral("Sin modelo activo") : m_activeModel;
+    m_activeModelLabel->setText(text);
+    m_activeModelLabel->setToolTip(text);
 }
 
 void SettingsView::setActiveModelFromProvider() {
@@ -1377,23 +1697,69 @@ void SettingsView::setActiveModelFromProvider() {
             QString mid = m_activeModelId;
             if (mid.isEmpty()) {
                 m_activeModel = "Sin modelo";
+                updateActiveModelLabel();
                 return;
             }
             QString display = prettyModelName(mid);
             if (display.isEmpty()) display = mid;
             m_activeModel = p.displayName + " · " + display;
+            updateActiveModelLabel();
             emit modelSelected(m_activeModel);
             return;
         }
     }
     m_activeModel = "Sin modelo";
+    updateActiveModelLabel();
+}
+
+bool SettingsView::ensureQuickModel(const QString &providerId, const QString &modelId,
+                                    int contextWindowTokens) {
+    if (providerId.isEmpty() || modelId.isEmpty()) return false;
+    for (auto &entry : m_quickModels) {
+        if (entry.providerId == providerId && entry.modelId == modelId) {
+            if (contextWindowTokens > 0)
+                entry.contextWindowTokens = contextWindowTokens;
+            return true;
+        }
+    }
+    if (m_quickModels.size() >= MAX_QUICK_MODELS) {
+        emit statusMessageRequested(
+            "No se puede activar un modelo fuera de acceso rápido: ya hay 5 modelos.");
+        return false;
+    }
+    const int providerIndex = providerIndexById(providerId);
+    if (providerIndex < 0) return false;
+    const ProviderDef &provider = m_providers[providerIndex];
+
+    QuickModelEntry entry;
+    entry.id = providerId + ":" + modelId;
+    entry.providerId = providerId;
+    entry.providerName = provider.displayName;
+    entry.modelId = modelId;
+    entry.displayName = prettyModelName(modelId);
+    entry.availability = classifyAvailability(providerId, modelId, QString(), QString());
+    entry.contextWindowTokens = contextWindowTokens;
+    m_quickModels.append(entry);
+    return true;
 }
 
 void SettingsView::activateModel(const QString &providerId, const QString &modelId, int contextWindowTokens) {
+    if (!ensureQuickModel(providerId, modelId, contextWindowTokens)) return;
     m_activeProviderId = providerId;
     m_activeModelId = modelId;
     m_activeModelContextWindow = contextWindowTokens;
+    m_activeModelContextSource.clear();
+    for (const auto &entry : m_quickModels) {
+        if (entry.providerId == providerId && entry.modelId == modelId) {
+            if (m_activeModelContextWindow <= 0)
+                m_activeModelContextWindow = entry.contextWindowTokens;
+            m_activeModelContextSource = entry.contextWindowSource;
+            break;
+        }
+    }
     setActiveModelFromProvider();
+    saveSettings();
+    refreshModelsList();
     emit activeModelChanged(providerId, modelId);
     emit providerConfigChanged();
 }
@@ -1435,6 +1801,30 @@ void SettingsView::loadSettings() {
     QSettings settings("Loryq", "Voryel");
     bool needsMigration = false;
 
+    // "Claude" named the model family in an older build. Keep existing
+    // credentials/models working, but present the actual provider as Anthropic.
+    if (!settings.contains("providers/anthropic/configured")
+        && settings.contains("providers/claude/configured")) {
+        settings.setValue("providers/anthropic/configured", settings.value("providers/claude/configured"));
+        settings.setValue("providers/anthropic/baseUrl", settings.value("providers/claude/baseUrl"));
+        settings.setValue("providers/anthropic/apiKeyProtected", settings.value("providers/claude/apiKeyProtected"));
+        if (settings.contains("providers/claude/apiKey"))
+            settings.setValue("providers/anthropic/apiKey", settings.value("providers/claude/apiKey"));
+        needsMigration = true;
+    }
+
+    const int customCount = settings.beginReadArray("customProviders");
+    for (int i = 0; i < customCount; ++i) {
+        settings.setArrayIndex(i);
+        const QString id = settings.value("id").toString();
+        const QString name = settings.value("displayName").toString().trimmed();
+        if (id.isEmpty() || name.isEmpty() || providerIndexById(id) >= 0) continue;
+        m_providers.append({ id, name, "Personalizado",
+            "API compatible con OpenAI.", false, false, false, false,
+            QString(), QString(), true });
+    }
+    settings.endArray();
+
     settings.beginGroup("providers");
     for (auto &provider : m_providers) {
         settings.beginGroup(provider.id);
@@ -1452,6 +1842,10 @@ void SettingsView::loadSettings() {
     settings.endGroup();
 
     m_activeProviderId = settings.value("models/activeProviderId", m_activeProviderId).toString();
+    if (m_activeProviderId == "claude") {
+        m_activeProviderId = "anthropic";
+        needsMigration = true;
+    }
     m_activeModelId = settings.value("models/activeModelId", m_activeModelId).toString();
 
     const int count = settings.beginReadArray("quickModels");
@@ -1461,10 +1855,24 @@ void SettingsView::loadSettings() {
         QuickModelEntry entry;
         entry.id = settings.value("id").toString();
         entry.providerId = settings.value("providerId").toString();
+        if (entry.providerId == "claude") {
+            entry.providerId = "anthropic";
+            needsMigration = true;
+        }
+        if (entry.providerName.compare("Claude", Qt::CaseInsensitive) == 0) {
+            entry.providerName = "Anthropic";
+            needsMigration = true;
+        }
+        if (entry.providerId == "anthropic" && entry.id.startsWith("claude:")) {
+            entry.id = "anthropic:" + entry.modelId;
+            needsMigration = true;
+        }
         entry.providerName = settings.value("providerName").toString();
         entry.modelId = settings.value("modelId").toString();
         entry.displayName = settings.value("displayName").toString();
         entry.availability = settings.value("availability").toString();
+        entry.contextWindowTokens = settings.value("contextWindowTokens", 0).toInt();
+        entry.contextWindowSource = settings.value("contextWindowSource").toString();
         if (entry.id.isEmpty() && !entry.providerId.isEmpty() && !entry.modelId.isEmpty())
             entry.id = entry.providerId + ":" + entry.modelId;
         if (!entry.providerId.isEmpty() && !entry.modelId.isEmpty())
@@ -1480,6 +1888,16 @@ void SettingsView::loadSettings() {
 
 void SettingsView::saveSettings() const {
     QSettings settings("Loryq", "Voryel");
+
+    settings.beginWriteArray("customProviders");
+    int customIndex = 0;
+    for (const auto &provider : m_providers) {
+        if (!provider.custom) continue;
+        settings.setArrayIndex(customIndex++);
+        settings.setValue("id", provider.id);
+        settings.setValue("displayName", provider.displayName);
+    }
+    settings.endArray();
 
     settings.beginGroup("providers");
     for (const auto &provider : m_providers) {
@@ -1506,6 +1924,8 @@ void SettingsView::saveSettings() const {
         settings.setValue("modelId", entry.modelId);
         settings.setValue("displayName", entry.displayName);
         settings.setValue("availability", entry.availability);
+        settings.setValue("contextWindowTokens", entry.contextWindowTokens);
+        settings.setValue("contextWindowSource", entry.contextWindowSource);
     }
     settings.endArray();
 }
@@ -1515,6 +1935,9 @@ void SettingsView::refreshProvidersList() {
     clearLayout(m_providerListLayout);
     for (int i = 0; i < m_providers.size(); ++i)
         m_providerListLayout->addWidget(makeProviderRow(i));
+    if (QWidget *container = m_providerListLayout->parentWidget())
+        container->setMinimumHeight(m_providers.size() * 66
+                                    + qMax(0, m_providers.size() - 1) * 6);
 }
 
 QWidget* SettingsView::makeProvidersSection() {
@@ -1531,7 +1954,7 @@ QWidget* SettingsView::makeProvidersSection() {
     m_providerScroll->setFrameShape(QFrame::NoFrame);
     m_providerScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_providerScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_providerScroll->setMaximumHeight(4 * 72 + 10); // ~4 cards + spacing
+    m_providerScroll->setFixedHeight(4 * 66 + 3 * 6); // exactly 4 complete cards
     m_providerScroll->viewport()->installEventFilter(this);
     m_providerScroll->viewport()->setProperty("_isProviderScroll", true);
     m_providerScroll->setStyleSheet(
@@ -1548,22 +1971,54 @@ QWidget* SettingsView::makeProvidersSection() {
     m_providerListLayout = new QVBoxLayout(providerContainer);
     m_providerListLayout->setContentsMargins(0, 0, 0, 0);
     m_providerListLayout->setSpacing(6);
+    m_providerListLayout->setSizeConstraint(QLayout::SetMinimumSize);
 
     for (int i = 0; i < m_providers.size(); ++i) {
         m_providerListLayout->addWidget(makeProviderRow(i));
     }
+    providerContainer->setMinimumHeight(m_providers.size() * 66
+                                        + qMax(0, m_providers.size() - 1) * 6);
     m_providerScroll->setWidget(providerContainer);
     layout->addWidget(m_providerScroll);
 
-    // ── Dynamic config block (hidden by default) ──
-    // We create placeholders; fields are added/removed dynamically when a provider is selected.
-    m_providerConfigBlock = new QWidget(section);
-    m_providerConfigBlock->setStyleSheet("background: transparent; border: none;");
-    m_providerConfigBlock->setVisible(false);
+    auto *addProviderBtn = makeGhostButton("+ Agregar proveedor personalizado");
+    connect(addProviderBtn, &QPushButton::clicked,
+            this, &SettingsView::beginAddingCustomProvider);
+    layout->addWidget(addProviderBtn);
+
+    // ── Provider window (same card language as workflow dialogs) ──
+    m_providerDialog = new VoryelDialog("Configurar proveedor", this);
+    m_providerDialog->setMinimumWidth(500);
+    m_providerConfigBlock = m_providerDialog;
     auto *configBlock = m_providerConfigBlock;
-    auto *cfgL = new QVBoxLayout(configBlock);
-    cfgL->setContentsMargins(0, 0, 0, 0);
-    cfgL->setSpacing(4);
+    auto *cfgL = m_providerDialog->bodyLayout();
+
+    auto *formHeader = new QHBoxLayout();
+    formHeader->setSpacing(9);
+    formHeader->addWidget(makeIcon(":/icons/icons/cpu.svg", QColor(Style::VIOLET), 18));
+    m_providerConfigTitle = makeText("Configurar proveedor", 14, Style::INK, 900);
+    formHeader->addWidget(m_providerConfigTitle, 1);
+    cfgL->addLayout(formHeader);
+
+    auto *nameContainer = new QWidget(configBlock);
+    nameContainer->setStyleSheet("background: transparent; border: none;");
+    auto *nameL = new QHBoxLayout(nameContainer);
+    nameL->setContentsMargins(0, 4, 0, 4);
+    nameL->setSpacing(10);
+    auto *nameLabel = makeText("Nombre", 12, Style::TEXT_MUTED, 800);
+    nameLabel->setMinimumWidth(75);
+    nameL->addWidget(nameLabel, 0, Qt::AlignVCenter);
+    m_providerNameEdit = new QLineEdit();
+    m_providerNameEdit->setPlaceholderText("Ej.: Mi servidor");
+    m_providerNameEdit->setMinimumHeight(32);
+    m_providerNameEdit->setStyleSheet(QString(
+        "QLineEdit { background: %1; color: %2; border: 2px solid %3; border-radius: 8px;"
+        "  padding: 4px 10px; font-size: 12px; font-weight: 600; }"
+        "QLineEdit:focus { border-color: %4; }"
+    ).arg(Style::WHITE, Style::INK, Style::INK, Style::VIOLET));
+    nameL->addWidget(m_providerNameEdit, 1);
+    cfgL->addWidget(nameContainer);
+    nameContainer->setVisible(false);
 
     // Containers for dynamic fields
     auto *baseUrlContainer = new QWidget(configBlock);
@@ -1581,7 +2036,7 @@ QWidget* SettingsView::makeProvidersSection() {
         "QLineEdit { background: %1; color: %2; border: 2px solid %3; border-radius: 8px;"
         "  padding: 4px 10px; font-size: 12px; font-weight: 600; font-family: 'Consolas','Courier New',monospace; }"
         "QLineEdit:focus { border-color: %4; }"
-    ).arg(Style::BG_LILAC, Style::INK, Style::BORDER_SOFT, Style::VIOLET));
+    ).arg(Style::WHITE, Style::INK, Style::INK, Style::VIOLET));
     connect(m_baseUrlEdit, &QLineEdit::textChanged, this, &SettingsView::providerConfigChanged);
     baseUrlL->addWidget(m_baseUrlEdit, 1);
     cfgL->addWidget(baseUrlContainer);
@@ -1611,23 +2066,32 @@ QWidget* SettingsView::makeProvidersSection() {
     btnRow->addWidget(cancelBtn, 1);
     btnRow->addWidget(saveBtn, 1);
     cfgL->addLayout(btnRow);
-    layout->addWidget(configBlock);
 
     // Save handler
     connect(saveBtn, &QPushButton::clicked, this, [this, configBlock]() {
         int idx = m_editingProviderIndex;
-        if (idx < 0 || idx >= m_providers.size()) return;
-        auto &p = m_providers[idx];
-        QString url = m_baseUrlEdit ? m_baseUrlEdit->text().trimmed() : QString();
+        if (!m_addingCustomProvider && (idx < 0 || idx >= m_providers.size())) return;
+        const QString customName = m_providerNameEdit
+            ? m_providerNameEdit->text().trimmed() : QString();
+        QString url = m_baseUrlEdit
+            ? normalizedProviderBaseUrl(m_baseUrlEdit->text()) : QString();
         QString key = m_apiKeyEdit  ? m_apiKeyEdit->text().trimmed()  : QString();
 
+        if (m_addingCustomProvider && customName.isEmpty()) {
+            emit statusMessageRequested("Escribí un nombre para el proveedor.");
+            return;
+        }
+
+        ProviderDef *provider = m_addingCustomProvider ? nullptr : &m_providers[idx];
+
         // For cloud providers, use preset URL if user left it empty
-        if (url.isEmpty() && !p.isLocal) {
-            url = presetBaseUrl(p.id);
+        if (url.isEmpty() && provider && !provider->isLocal) {
+            url = presetBaseUrl(provider->id);
             if (url.isEmpty()) url = m_baseUrlEdit ? m_baseUrlEdit->placeholderText() : QString();
         }
-        if (url.isEmpty()) {
-            emit statusMessageRequested("Completá la Base URL o elegí un proveedor cloud.");
+        url = normalizedProviderBaseUrl(url);
+        if (!isValidProviderBaseUrl(url)) {
+            emit statusMessageRequested("Ingresá una Base URL válida con http:// o https://.");
             return;
         }
         if (!isSafeProviderUrlForApiKey(url, key)) {
@@ -1635,26 +2099,51 @@ QWidget* SettingsView::makeProvidersSection() {
             return;
         }
 
-        p.baseUrl = url;
-        p.apiKey  = key;
-        p.configured = !p.baseUrl.isEmpty();
+        if (m_addingCustomProvider) {
+            const QString id = "custom_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+            m_providers.append({ id, customName, "Personalizado",
+                "API compatible con OpenAI.", isLocalProviderBaseUrl(url), false,
+                false, true, url, key, true });
+            idx = m_providers.size() - 1;
+        } else {
+            provider->baseUrl = url;
+            provider->apiKey = key;
+            provider->configured = true;
+            if (provider->custom) {
+                provider->displayName = customName;
+                provider->isLocal = isLocalProviderBaseUrl(url);
+                for (auto &model : m_quickModels) {
+                    if (model.providerId == provider->id)
+                        model.providerName = customName;
+                }
+                if (provider->id == m_activeProviderId)
+                    setActiveModelFromProvider();
+            }
+        }
+        const QString savedName = m_providers[idx].displayName;
         saveSettings();
         refreshProvidersList();
 
         m_editingProviderIndex = -1;
-        configBlock->setVisible(false);
-        emit configurationSaved(p.displayName, QString());
+        m_addingCustomProvider = false;
+        if (m_providerDialog) m_providerDialog->accept();
+        emit configurationSaved(savedName, QString());
         emit providerConfigChanged();
-        emit statusMessageRequested("Proveedor configurado: " + p.displayName);
+        emit statusMessageRequested("Proveedor configurado: " + savedName);
     });
 
     // Cancel handler
     connect(cancelBtn, &QPushButton::clicked, this, [this, configBlock]() {
         m_editingProviderIndex = -1;
-        configBlock->setVisible(false);
+        m_addingCustomProvider = false;
+        if (m_providerDialog) m_providerDialog->reject();
     });
 
     m_editingProviderIndex = -1;
+    connect(m_providerDialog, &QDialog::rejected, this, [this]() {
+        m_editingProviderIndex = -1;
+        m_addingCustomProvider = false;
+    });
 
     // Streaming toggle (global)
     layout->addWidget(makeToggleRow("Usar streaming si el proveedor lo soporta", &m_streamingCheck, true));
@@ -1671,6 +2160,7 @@ QWidget* SettingsView::makeProviderRow(int idx) {
     card->setCornerRadius(12);
     card->setFullBorder(QColor(Style::INK), 2);
     card->setHardShadow(QColor(Style::INK), 2, 2);
+    card->setMinimumHeight(66);
     card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
 
     auto *mainLayout = new QVBoxLayout(card);
@@ -1709,23 +2199,22 @@ QWidget* SettingsView::makeProviderRow(int idx) {
 
     // Action buttons
     if (!prov.comingSoon) {
-        // Detect button always visible for configured providers
-        if (prov.configured) {
-            auto *detectBtn = makeGhostButton("Detectar");
-            detectBtn->setFixedWidth(80);
-            connect(detectBtn, &QPushButton::clicked, this, [this, idx]() {
-                if (idx >= 0 && idx < m_providers.size() && !m_providers[idx].baseUrl.isEmpty())
-                    emit statusMessageRequested("Detectando modelos desde " + m_providers[idx].baseUrl + "...");
-            });
-            headerRow->addWidget(detectBtn, 0, Qt::AlignVCenter);
-        }
-
         // Configurar/Conectar button
         auto *cfgBtn = makeGhostButton(prov.configured ? "Configurar" : "Conectar");
-        cfgBtn->setFixedWidth(prov.configured ? 90 : 85);
+        cfgBtn->setMinimumWidth(prov.configured ? 108 : 92);
         connect(cfgBtn, &QPushButton::clicked, this, [this, idx]() {
             m_editingProviderIndex = idx;
+            m_addingCustomProvider = false;
             const auto &p = m_providers[idx];
+            if (m_providerConfigTitle)
+                m_providerConfigTitle->setText((p.configured ? "Configurar " : "Conectar ") + p.displayName);
+            if (m_providerDialog)
+                m_providerDialog->setDialogTitle((p.configured ? "Configurar " : "Conectar ") + p.displayName);
+
+            if (m_providerNameEdit) {
+                m_providerNameEdit->setText(p.displayName);
+                m_providerNameEdit->parentWidget()->setVisible(p.custom);
+            }
 
             // Show/hide Base URL based on provider type
             if (p.isLocal) {
@@ -1734,7 +2223,7 @@ QWidget* SettingsView::makeProviderRow(int idx) {
                     m_baseUrlEdit->setText(p.baseUrl.isEmpty() ? presetBaseUrl(p.id) : p.baseUrl);
                     m_baseUrlEdit->parentWidget()->setVisible(true);
                 }
-            } else if (p.id == "custom") {
+            } else if (p.custom) {
                 // Custom: show Base URL
                 if (m_baseUrlEdit) {
                     m_baseUrlEdit->setText(p.baseUrl);
@@ -1760,31 +2249,196 @@ QWidget* SettingsView::makeProviderRow(int idx) {
                 }
             }
 
-            if (m_providerConfigBlock) m_providerConfigBlock->setVisible(true);
+            if (m_providerDialog) m_providerDialog->open();
             emit statusMessageRequested("Configurando " + p.displayName + "...");
         });
         headerRow->addWidget(cfgBtn, 0, Qt::AlignVCenter);
+
+        if (prov.configured) {
+            auto *disconnectBtn = new QPushButton();
+            disconnectBtn->setToolTip("Desconectar " + prov.displayName);
+            disconnectBtn->setCursor(Qt::PointingHandCursor);
+            disconnectBtn->setFixedSize(24, 24);
+            disconnectBtn->setIcon(IconUtil::coloredIcon(
+                ":/icons/icons/x.svg", QColor(Style::WHITE), QSize(11, 11)));
+            disconnectBtn->setIconSize(QSize(11, 11));
+            disconnectBtn->setStyleSheet(
+                "QPushButton { background: #ef4444; border: 2px solid #1a1a1a;"
+                " border-radius: 12px; padding: 0; }"
+                "QPushButton:hover { background: #dc2626; }"
+                "QPushButton:pressed { background: #b91c1c; }"
+            );
+            connect(disconnectBtn, &QPushButton::clicked, this,
+                    [this, idx]() { confirmDisconnectProvider(idx); });
+            headerRow->addWidget(disconnectBtn, 0, Qt::AlignVCenter);
+        }
     }
 
     mainLayout->addLayout(headerRow);
     return card;
 }
 
-ProviderConfig SettingsView::providerConfig() const {
-    ProviderConfig cfg;
+void SettingsView::beginAddingCustomProvider() {
+    m_editingProviderIndex = -1;
+    m_addingCustomProvider = true;
+    if (m_providerConfigTitle) m_providerConfigTitle->setText("Agregar proveedor personalizado");
+    if (m_providerDialog) m_providerDialog->setDialogTitle("Agregar proveedor personalizado");
+    if (m_providerNameEdit) {
+        m_providerNameEdit->clear();
+        m_providerNameEdit->parentWidget()->setVisible(true);
+    }
+    if (m_baseUrlEdit) {
+        m_baseUrlEdit->clear();
+        m_baseUrlEdit->setPlaceholderText("https://api.ejemplo.com/v1");
+        m_baseUrlEdit->parentWidget()->setVisible(true);
+    }
+    if (m_apiKeyEdit) {
+        m_apiKeyEdit->clear();
+        m_apiKeyEdit->setPlaceholderText("Opcional — vacío permitido");
+        m_apiKeyEdit->parentWidget()->setVisible(true);
+    }
+    if (m_providerDialog) m_providerDialog->open();
+    if (m_providerNameEdit) m_providerNameEdit->setFocus();
+}
 
-    // Prefer live edit fields (visible during inline editing)
-    if (m_baseUrlEdit && m_apiKeyEdit && m_modelIdEdit) {
-        cfg.baseUrl   = m_baseUrlEdit->text().trimmed();
-        cfg.apiKey    = m_apiKeyEdit->text().trimmed();
-        cfg.modelId   = m_modelIdEdit->text().trimmed();
-        // If edit fields are non-empty, use them
-        if (!cfg.baseUrl.isEmpty()) {
-            cfg.streaming = m_streamingCheck ? m_streamingCheck->isOn() : true;
-            cfg.contextWindowTokens = m_activeModelContextWindow;
-            return cfg;
+void SettingsView::removeCustomProvider(int index) {
+    if (index < 0 || index >= m_providers.size() || !m_providers[index].custom) return;
+    const ProviderDef removed = m_providers[index];
+    m_editingProviderIndex = -1;
+    m_addingCustomProvider = false;
+    if (m_providerConfigBlock) m_providerConfigBlock->setVisible(false);
+
+    for (int i = m_quickModels.size() - 1; i >= 0; --i) {
+        if (m_quickModels[i].providerId == removed.id)
+            m_quickModels.remove(i);
+    }
+    m_fallbackQuickModelIds.erase(
+        std::remove_if(m_fallbackQuickModelIds.begin(), m_fallbackQuickModelIds.end(),
+            [this](const QString &id) {
+                for (const auto &model : m_quickModels)
+                    if (model.id == id) return false;
+                return true;
+            }),
+        m_fallbackQuickModelIds.end());
+
+    m_providers.remove(index);
+    if (m_activeProviderId == removed.id) {
+        if (!m_quickModels.isEmpty()) {
+            m_activeProviderId = m_quickModels.first().providerId;
+            m_activeModelId = m_quickModels.first().modelId;
+            m_activeModelContextWindow = m_quickModels.first().contextWindowTokens;
+            m_activeModelContextSource = m_quickModels.first().contextWindowSource;
+            setActiveModelFromProvider();
+        } else {
+            m_activeProviderId = "lm_studio";
+            m_activeModelId.clear();
+            m_activeModelContextWindow = 0;
+            m_activeModelContextSource.clear();
+            m_activeModel = "Sin modelo";
+            updateActiveModelLabel();
+            emit modelSelected(m_activeModel);
         }
     }
+
+    QSettings settings("Loryq", "Voryel");
+    settings.remove("providers/" + removed.id);
+    saveSettings();
+    refreshProvidersList();
+    refreshModelsList();
+    emit providerConfigChanged();
+    emit statusMessageRequested("Proveedor eliminado: " + removed.displayName);
+}
+
+void SettingsView::confirmDisconnectProvider(int index) {
+    if (index < 0 || index >= m_providers.size() || !m_providers[index].configured)
+        return;
+    const QString providerName = m_providers[index].displayName;
+
+    VoryelDialog dialog("Desconectar " + providerName, this);
+    dialog.setMinimumWidth(460);
+    auto *layout = dialog.bodyLayout();
+
+    auto *title = makeText("¿Desconectar " + providerName + "?", 17, Style::INK, 950);
+    layout->addWidget(title);
+    auto *description = makeText(
+        "Se quitarán sus credenciales y los modelos de este proveedor del acceso rápido.",
+        12, Style::TEXT_MUTED, 650);
+    description->setWordWrap(true);
+    layout->addWidget(description);
+
+    auto *buttons = new QHBoxLayout();
+    buttons->setSpacing(10);
+    auto *cancel = makeGhostButton("Cancelar");
+    auto *disconnect = new QPushButton("Desconectarse");
+    disconnect->setCursor(Qt::PointingHandCursor);
+    disconnect->setMinimumHeight(36);
+    disconnect->setStyleSheet(
+        "QPushButton { background: #ef4444; color: white; border: 2px solid #1a1a1a;"
+        " border-radius: 9px; padding: 0 15px; font-size: 12px; font-weight: 900; }"
+        "QPushButton:hover { background: #dc2626; }"
+        "QPushButton:pressed { background: #b91c1c; }"
+    );
+    buttons->addWidget(cancel, 1);
+    buttons->addWidget(disconnect, 1);
+    layout->addLayout(buttons);
+
+    connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(disconnect, &QPushButton::clicked, &dialog, &QDialog::accept);
+    if (dialog.exec() == QDialog::Accepted)
+        disconnectProvider(index);
+}
+
+void SettingsView::disconnectProvider(int index) {
+    if (index < 0 || index >= m_providers.size()) return;
+    ProviderDef &provider = m_providers[index];
+    const QString providerId = provider.id;
+    const QString providerName = provider.displayName;
+
+    provider.configured = false;
+    provider.apiKey.clear();
+
+    for (int i = m_quickModels.size() - 1; i >= 0; --i) {
+        if (m_quickModels[i].providerId == providerId)
+            m_quickModels.remove(i);
+    }
+    m_fallbackQuickModelIds.erase(
+        std::remove_if(m_fallbackQuickModelIds.begin(), m_fallbackQuickModelIds.end(),
+            [this](const QString &id) {
+                for (const auto &model : m_quickModels)
+                    if (model.id == id) return false;
+                return true;
+            }),
+        m_fallbackQuickModelIds.end());
+
+    if (m_activeProviderId == providerId) {
+        if (!m_quickModels.isEmpty()) {
+            const QuickModelEntry &next = m_quickModels.first();
+            m_activeProviderId = next.providerId;
+            m_activeModelId = next.modelId;
+            m_activeModelContextWindow = next.contextWindowTokens;
+            m_activeModelContextSource = next.contextWindowSource;
+            setActiveModelFromProvider();
+            emit activeModelChanged(m_activeProviderId, m_activeModelId);
+        } else {
+            m_activeProviderId = "lm_studio";
+            m_activeModelId.clear();
+            m_activeModelContextWindow = 0;
+            m_activeModelContextSource.clear();
+            m_activeModel = "Sin modelo";
+            updateActiveModelLabel();
+            emit modelSelected(m_activeModel);
+        }
+    }
+
+    saveSettings();
+    refreshProvidersList();
+    refreshModelsList();
+    emit providerConfigChanged();
+    emit statusMessageRequested("Proveedor desconectado: " + providerName);
+}
+
+ProviderConfig SettingsView::providerConfig() const {
+    ProviderConfig cfg;
 
     // Fall back to active provider config
     for (const auto &p : m_providers) {
@@ -1792,8 +2446,11 @@ ProviderConfig SettingsView::providerConfig() const {
             cfg.baseUrl   = p.baseUrl;
             cfg.apiKey    = p.apiKey;
             cfg.modelId   = m_activeModelId;
+            cfg.providerId = p.id;
+            cfg.providerName = p.displayName;
             cfg.streaming = m_streamingCheck ? m_streamingCheck->isOn() : true;
             cfg.contextWindowTokens = m_activeModelContextWindow;
+            cfg.contextWindowSource = m_activeModelContextSource;
             return cfg;
         }
     }
@@ -1808,6 +2465,20 @@ void SettingsView::setProviderConfig(const ProviderConfig &config) {
     if (!isSafeProviderUrlForApiKey(config.baseUrl, config.apiKey)) {
         emit statusMessageRequested("No se puede guardar una API key con HTTP externo. Usa HTTPS o un proveedor local.");
         return;
+    }
+
+    m_activeModelContextWindow = config.contextWindowTokens;
+    m_activeModelContextSource = config.contextWindowSource;
+
+    if (!config.modelId.isEmpty()
+        && !ensureQuickModel("lm_studio", config.modelId, config.contextWindowTokens)) {
+        return;
+    }
+    for (auto &entry : m_quickModels) {
+        if (entry.providerId == "lm_studio" && entry.modelId == config.modelId) {
+            entry.contextWindowSource = config.contextWindowSource;
+            break;
+        }
     }
 
     // Update the LM Studio provider (default)
@@ -1828,6 +2499,7 @@ void SettingsView::setProviderConfig(const ProviderConfig &config) {
 
     setActiveModelFromProvider();
     saveSettings();
+    refreshModelsList();
     refreshProvidersList();
     refreshModelsList();
 }

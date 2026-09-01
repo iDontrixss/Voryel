@@ -21,6 +21,7 @@ public:
     static QString buildEnvelope(const TaskEnvelopeParams &params);
     static QString detectMode(const QString &userMessage, QString &outCleanMessage);
     static QString sanitizeMessage(const QString &message);
+    static QString cleanModelResponse(const QString &response);
     static QString providerDisplayNameFromUrl(const QString &baseUrl);
     static QString detectProviderId(const QString &baseUrl);
 };

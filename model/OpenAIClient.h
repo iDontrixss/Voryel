@@ -5,6 +5,8 @@
 #include <QNetworkReply>
 #include "ModelTypes.h"
 
+class QJsonObject;
+
 class OpenAIClient : public QObject {
     Q_OBJECT
 public:
@@ -16,6 +18,8 @@ public:
 
 signals:
     void tokenReceived(const QString &token);
+    void reasoningReceived(const QString &summaryDelta);
+    void usageReceived(const TokenUsage &usage);
     void finished(const QString &fullResponse);
     void errorOccurred(const QString &message);
     void modelsDetected(const QStringList &modelIds);
@@ -26,14 +30,23 @@ private slots:
     void onFinished();
 
 private:
+    enum class ApiFlavor { OpenAICompatible, OpenAIResponses, Anthropic, Gemini };
+
     QNetworkAccessManager *m_manager;
     QNetworkReply *m_currentReply = nullptr;
     QByteArray m_sseBuffer;
     QString m_fullResponse;
     bool m_streamActive = false;
+    bool m_finishedEmitted = false;
     bool m_firstToken = true;
     ProviderConfig m_currentConfig;
+    ApiFlavor m_apiFlavor = ApiFlavor::OpenAICompatible;
 
     void processSSE();
     void handleNonStreamResponse(const QByteArray &data);
+    void processUsage(const QJsonObject &object);
+    void processAnthropicUsage(const QJsonObject &object);
+    void processGeminiUsage(const QJsonObject &object);
+    void processResponsesUsage(const QJsonObject &object);
+    void finishStream();
 };

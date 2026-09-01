@@ -14,6 +14,7 @@ class QPushButton;
 class SolidPanel;
 class QScrollArea;
 class QNetworkAccessManager;
+class VoryelDialog;
 
 struct ProviderDef {
     QString id;
@@ -27,6 +28,7 @@ struct ProviderDef {
     bool configured = false;
     QString baseUrl;
     QString apiKey;
+    bool custom = false;
 };
 
 struct QuickModelEntry {
@@ -37,6 +39,7 @@ struct QuickModelEntry {
     QString displayName;
     QString availability; // "Local", "Gratis", "Pago", "No informado", etc.
     int contextWindowTokens = 0; // 0=use catalog/default
+    QString contextWindowSource;
 };
 
 class SettingsView : public QWidget {
@@ -102,8 +105,12 @@ private:
     // Shared provider config fields
     QLineEdit *m_baseUrlEdit = nullptr;
     QLineEdit *m_apiKeyEdit = nullptr;
+    QLineEdit *m_providerNameEdit = nullptr;
     QLineEdit *m_modelIdEdit = nullptr;
     QWidget *m_providerConfigBlock = nullptr;
+    VoryelDialog *m_providerDialog = nullptr;
+    QLabel *m_providerConfigTitle = nullptr;
+    bool m_addingCustomProvider = false;
 
     // Provider scroll area (for scroll propagation fix)
     QScrollArea *m_providerScroll = nullptr;
@@ -111,6 +118,7 @@ private:
 
     // Models section layout (for refresh after add/remove)
     QVBoxLayout *m_modelsListLayout = nullptr;
+    QLabel *m_activeModelLabel = nullptr;
 
     // Add-model panel guard
     QWidget *m_addModelPanel = nullptr;
@@ -118,11 +126,16 @@ private:
 
     // Network for model detection
     QNetworkAccessManager *m_networkManager = nullptr;
+    QMap<QString, int> m_modelsDevContexts;
+    QMap<QString, QString> m_modelsDevProviderNames;
+    QMap<QString, QString> m_modelsDevProviderApis;
+    bool m_modelsDevRequested = false;
 
     // Active provider+model tracking
     QString m_activeProviderId = "lm_studio";
     QString m_activeModelId;
     int m_activeModelContextWindow = 0;
+    QString m_activeModelContextSource;
 
     void buildUi();
     void refreshPermissionCards();
@@ -132,10 +145,17 @@ private:
     void finishAddingQuickModel();
     void closeAddModelPanel();
     void refreshProvidersList();
+    void beginAddingCustomProvider();
+    void removeCustomProvider(int index);
+    void confirmDisconnectProvider(int index);
+    void disconnectProvider(int index);
     void refreshModelsList();
     void loadSettings();
     void saveSettings() const;
     int providerIndexById(const QString &id) const;
+    bool ensureQuickModel(const QString &providerId, const QString &modelId,
+                          int contextWindowTokens = 0);
+    void updateActiveModelLabel();
 
     QWidget* makeHeader();
     QWidget* makeSectionTitle(const QString &iconRes, const QString &title);
@@ -157,4 +177,6 @@ private:
     QWidget* makeQuickModelRow(int idx);
     QWidget* makeAddModelDialog();
     void fetchModelsForProvider(int providerIdx, QComboBox *combo, QVBoxLayout *resultLayout, QWidget *loadingLabel);
+    void fetchModelsDevCatalog();
+    int modelsDevContextFor(const ProviderDef &provider, const QString &modelId) const;
 };

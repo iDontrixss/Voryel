@@ -10,8 +10,6 @@ class QHBoxLayout;
 class QStackedWidget;
 
 // ── Datos mostrados en el Dashboard ──────────────────────────
-// Equivalentes a los tipos Project/Session/Workflow del mockup TSX
-// (src/types.ts + src/data.ts), simplificados a lo que usa esta vista.
 
 struct DashProject {
     QString id;
@@ -25,9 +23,10 @@ struct DashProject {
 struct DashSession {
     QString id;
     QString title;
-    QString status;       // "completed" | "active" | "error"
+    QString status;       // "active" | "recent" | "empty"
     QString model;
-    int filesChanged = 0;
+    int messageCount = 0;
+    int attachmentCount = 0;
     QString timestamp;
 };
 
@@ -35,11 +34,12 @@ struct DashWorkflow {
     QString id;
     QString iconRes;      // ruta del ícono en :/icons/...
     QString label;
+    QString description;
+    QString question;
+    QString promptPrefix;
 };
 
-// Vista principal: header + stats + workflows rápidos + tabs
-// (Proyectos/Sesiones/Historial) + panel lateral derecho con modelo
-// activo, permisos y checkpoint. Port fiel de DashboardView.tsx.
+// Vista principal: resumen real de proyectos/chats + workflows con contexto.
 class DashboardView : public QWidget {
     Q_OBJECT
 public:
@@ -53,6 +53,7 @@ public:
 signals:
     void projectOpened(const QString &projectId);
     void chatRequested(const QString &prompt, const QString &projectId);
+    void sessionOpened(const QString &sessionId);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -87,6 +88,7 @@ private:
     QWidget* makeSessionRow(const DashSession &s);
     QWidget* makeWorkflowQuickCard(const DashWorkflow &wf);
     QWidget* makeWorkflowFullCard(const DashWorkflow &wf);
+    void prepareWorkflow(const DashWorkflow &workflow);
     void clearLayout(QLayout *layout);
     void triggerInitialAnimations();
     bool m_initialAnimated = false;

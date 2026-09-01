@@ -1,9 +1,14 @@
 #include "TokenRadialMeter.h"
 #include "Style.h"
 #include <QPainter>
-#include <QToolTip>
-#include <QHelpEvent>
 #include <QMouseEvent>
+#include <QFrame>
+#include <QGridLayout>
+#include <QLabel>
+#include <QVBoxLayout>
+#include <QLocale>
+#include <QApplication>
+#include <QScreen>
 #include <QtMath>
 
 TokenRadialMeter::TokenRadialMeter(QWidget *parent)
@@ -11,97 +16,153 @@ TokenRadialMeter::TokenRadialMeter(QWidget *parent)
 {
     setFixedSize(METER_SIZE, METER_SIZE);
     setCursor(Qt::PointingHandCursor);
-    setToolTip(QStringLiteral("Contexto: 0 / 32768 tokens\nUso: 0%"));
+    setToolTip(QStringLiteral("Uso de contexto todavía no disponible"));
 }
 
-void TokenRadialMeter::setValue(int currentTokens, int maxTokens,
-                                 const QString &provider, const QString &model,
-                                 const QString &accuracy,
-                                 bool compactionPending)
+void TokenRadialMeter::setUsage(const TokenUsage &usage, qint64 contextLimit,
+                                const QString &provider, const QString &model,
+                                const QString &limitSource,
+                                bool compactionPending)
 {
-    m_current = qMax(0, currentTokens);
-    m_max = qMax(1, maxTokens);
+    m_usage = usage;
+    m_contextLimit = qMax<qint64>(0, contextLimit);
     m_provider = provider;
     m_model = model;
-    m_accuracy = accuracy;
+    m_limitSource = limitSource;
     m_compactionPending = compactionPending;
 
-    double pct = percent();
-    QString status;
-    if (m_compactionPending)
-        status = "Alto - Compactaci\u00f3n pendiente";
-    else
-        status = "Normal";
-
-    setToolTip(QStringLiteral(
-        "Contexto: %1 / %2 tokens\n"
-        "Uso: %3%\n"
-        "Modelo: %4 \u00b7 %5\n"
-        "Precisi\u00f3n: %6\n"
-        "Estado: %7"
-    ).arg(m_current).arg(m_max)
-     .arg(pct, 0, 'f', 1)
-     .arg(m_provider, m_model)
-     .arg(m_accuracy, status));
+    if (!m_usage.valid()) {
+        setToolTip(QStringLiteral("Uso de contexto todavía no disponible"));
+    } else if (m_contextLimit <= 0) {
+        setToolTip(QStringLiteral("Uso: %1 tokens\nLímite de contexto no informado")
+            .arg(formatTokens(m_usage.total())));
+    } else {
+        setToolTip(QStringLiteral("Contexto: %1 / %2\nUso: %3%\n%4")
+            .arg(formatTokens(m_usage.total()), formatTokens(m_contextLimit))
+            .arg(percent(), 0, 'f', 1)
+            .arg(m_usage.reported() ? "Reportado por el proveedor" : "Estimado"));
+    }
 
     update();
 }
 
 double TokenRadialMeter::percent() const {
-    return (double(m_current) / m_max) * 100.0;
+    if (m_contextLimit <= 0 || !m_usage.valid()) return 0.0;
+    return qMin(100.0, (double(m_usage.total()) / double(m_contextLimit)) * 100.0);
 }
 
-bool TokenRadialMeter::event(QEvent *event) {
-    return QWidget::event(event);
+QString TokenRadialMeter::formatTokens(qint64 value) const {
+    if (value <= 0) return QStringLiteral("—");
+    return QLocale().toString(value);
 }
 
 void TokenRadialMeter::paintEvent(QPaintEvent *) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing);
 
-    double pct = percent();
-    int activeSegs = qMin(SEGMENTS, (int)qRound(pct / 100.0 * SEGMENTS));
+    const QRectF arcRect(PEN_WIDTH, PEN_WIDTH,
+                         width() - PEN_WIDTH * 2, height() - PEN_WIDTH * 2);
+    p.setPen(QPen(QColor("#d4cce6"), PEN_WIDTH, Qt::SolidLine, Qt::RoundCap));
+    p.drawArc(arcRect, 90 * 16, -360 * 16);
 
-    QColor inactiveColor("#d4cce6");
-    QColor activeColor("#ffffff");
-    QColor warnColor("#fbbf24");
-
-    int cx = METER_SIZE / 2;
-    int cy = METER_SIZE / 2;
-    int radius = METER_SIZE / 2 - PEN_WIDTH;
-    double startAngle = -90.0;
-
-    for (int i = 0; i < SEGMENTS; ++i) {
-        double angle = startAngle + (360.0 / SEGMENTS) * i;
-        double rad = qDegreesToRadians(angle);
-        double nextRad = qDegreesToRadians(angle + 360.0 / SEGMENTS);
-
-        QPointF p1(cx + radius * qCos(rad), cy + radius * qSin(rad));
-        QPointF p2(cx + radius * qCos(nextRad), cy + radius * qSin(nextRad));
-
-        bool isActive = i < activeSegs;
-
-        QColor color;
-        if (isActive) {
-            if (pct >= 90.0)
-                color = warnColor;
-            else
-                color = activeColor;
-        } else {
-            color = inactiveColor;
-        }
-
-        p.setPen(QPen(color, PEN_WIDTH, Qt::SolidLine, Qt::RoundCap));
-        p.drawLine(p1, p2);
+    if (!m_usage.valid() || m_contextLimit <= 0) {
+        p.setPen(QPen(QColor(Style::TEXT_FAINT), 2, Qt::DashLine, Qt::RoundCap));
+        p.drawArc(arcRect.adjusted(2, 2, -2, -2), 90 * 16, -360 * 16);
+        return;
     }
 
-    // Center percentage text
-    QFont f = p.font();
-    f.setPixelSize(7);
-    f.setWeight(QFont::Black);
-    p.setFont(f);
+    const double pct = percent();
+    QColor progress(Style::VIOLET);
+    if (pct >= 95.0) progress = QColor("#dc2626");
+    else if (pct >= 85.0) progress = QColor("#f97316");
+    else if (pct >= 70.0) progress = QColor("#d97706");
+    p.setPen(QPen(progress, PEN_WIDTH, Qt::SolidLine, Qt::RoundCap));
+    p.drawArc(arcRect, 90 * 16, -qRound(360.0 * pct / 100.0) * 16);
+
     p.setPen(QColor(Style::INK));
-    QString pctText = QString::number((int)qRound(pct));
-    QRect r(0, 0, METER_SIZE, METER_SIZE);
-    p.drawText(r, Qt::AlignCenter, pctText);
+    p.setBrush(progress);
+    p.drawEllipse(QPointF(width() / 2.0, height() / 2.0), 2.2, 2.2);
+}
+
+void TokenRadialMeter::mousePressEvent(QMouseEvent *event) {
+    if (event->button() == Qt::LeftButton) {
+        showDetails();
+        event->accept();
+        return;
+    }
+    QWidget::mousePressEvent(event);
+}
+
+void TokenRadialMeter::showDetails() {
+    auto *popup = new QFrame(nullptr, Qt::Popup | Qt::FramelessWindowHint);
+    popup->setAttribute(Qt::WA_DeleteOnClose);
+    popup->setObjectName("contextUsagePopup");
+    popup->setMinimumWidth(330);
+    popup->setStyleSheet(QString(
+        "QFrame#contextUsagePopup { background: %1; border: 2px solid %2; border-radius: 10px; }"
+        "QLabel { border: none; background: transparent; color: %2; }"
+    ).arg(Style::WHITE, Style::INK));
+
+    auto *outer = new QVBoxLayout(popup);
+    outer->setContentsMargins(16, 14, 16, 14);
+    outer->setSpacing(12);
+
+    auto *title = new QLabel("Uso del contexto");
+    title->setStyleSheet("font-size: 14px; font-weight: 900;");
+    outer->addWidget(title);
+
+    auto *summary = new QLabel(m_usage.valid()
+        ? (m_contextLimit > 0
+              ? QString("%1 / %2 tokens · %3%")
+                    .arg(formatTokens(m_usage.total()), formatTokens(m_contextLimit))
+                    .arg(percent(), 0, 'f', 1)
+              : QString("%1 tokens · límite no informado")
+                    .arg(formatTokens(m_usage.total())))
+        : QStringLiteral("Todavía no hay métricas disponibles"));
+    summary->setStyleSheet(QString("font-size: 12px; color: %1;").arg(Style::TEXT_MUTED));
+    outer->addWidget(summary);
+
+    auto *grid = new QGridLayout();
+    grid->setHorizontalSpacing(18);
+    grid->setVerticalSpacing(7);
+    int row = 0;
+    auto addRow = [&](const QString &name, const QString &value) {
+        auto *key = new QLabel(name);
+        key->setStyleSheet(QString("font-size: 11px; color: %1;").arg(Style::TEXT_MUTED));
+        auto *val = new QLabel(value);
+        val->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        val->setStyleSheet("font-size: 11px; font-weight: 800;");
+        grid->addWidget(key, row, 0);
+        grid->addWidget(val, row, 1);
+        ++row;
+    };
+
+    addRow("Entrada", formatTokens(m_usage.input));
+    addRow("Salida", formatTokens(m_usage.output));
+    if (m_usage.reasoning > 0) addRow("Razonamiento", formatTokens(m_usage.reasoning));
+    if (m_usage.cacheRead > 0 || m_usage.cacheWrite > 0) {
+        addRow("Caché leída", formatTokens(m_usage.cacheRead));
+        addRow("Caché escrita", formatTokens(m_usage.cacheWrite));
+    }
+    addRow("Total", formatTokens(m_usage.total()));
+    addRow("Límite", m_contextLimit > 0
+        ? formatTokens(m_contextLimit) : QStringLiteral("No informado"));
+    addRow("Modelo", m_model.isEmpty() ? QStringLiteral("—") : m_model);
+    addRow("Proveedor", m_provider.isEmpty() ? QStringLiteral("—") : m_provider);
+    addRow("Precisión", m_usage.reported() ? "Reportado por el proveedor" : "Estimado");
+    addRow("Origen del límite", m_limitSource.isEmpty() ? QStringLiteral("—") : m_limitSource);
+    if (m_compactionPending) addRow("Estado", "Compactación pendiente");
+    outer->addLayout(grid);
+
+    popup->adjustSize();
+    QPoint position = mapToGlobal(QPoint(width() - popup->width(), height() + 8));
+    if (QScreen *screen = QApplication::screenAt(mapToGlobal(rect().center()))) {
+        const QRect available = screen->availableGeometry().adjusted(8, 8, -8, -8);
+        position.setX(qBound(available.left(), position.x(),
+                             available.right() - popup->width()));
+        if (position.y() + popup->height() > available.bottom())
+            position.setY(mapToGlobal(QPoint(0, -popup->height() - 8)).y());
+    }
+    popup->move(position);
+    popup->show();
 }

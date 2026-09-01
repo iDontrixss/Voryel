@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QJsonDocument>
+#include "../model/ModelTypes.h"
 
 struct ChatMessageData {
     QString role;
@@ -12,6 +13,7 @@ struct ChatMessageData {
     QString modelId;
     QString provider;
     QStringList attachments;
+    TokenUsage usage;
 };
 
 struct ChatSessionData {

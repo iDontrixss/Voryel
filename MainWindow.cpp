@@ -31,6 +31,67 @@
 #include <QTimer>
 #include <QPainter>
 #include <QFont>
+#include <QDateTime>
+
+namespace {
+QString configuredProviderId(const ProviderConfig &cfg) {
+    return cfg.providerId.trimmed().isEmpty()
+        ? PromptBuilder::detectProviderId(cfg.baseUrl) : cfg.providerId.trimmed();
+}
+
+QString configuredProviderName(const ProviderConfig &cfg) {
+    return cfg.providerName.trimmed().isEmpty()
+        ? PromptBuilder::providerDisplayNameFromUrl(cfg.baseUrl) : cfg.providerName.trimmed();
+}
+
+QString dashboardTimestamp(const QString &isoTimestamp) {
+    const QDateTime time = QDateTime::fromString(isoTimestamp, Qt::ISODate);
+    return time.isValid() ? time.toLocalTime().toString("dd MMM · HH:mm") : "Sin actividad";
+}
+
+QVector<DashSession> dashboardSessions(const ChatStore *store) {
+    QVector<DashSession> result;
+    if (!store) return result;
+    const QVector<ChatSessionData> chats = store->chats();
+    const int active = store->activeChatIndex();
+    result.reserve(chats.size());
+    for (int i = 0; i < chats.size(); ++i) {
+        const ChatSessionData &chat = chats[i];
+        DashSession session;
+        session.id = chat.id;
+        session.title = chat.title.isEmpty() ? "Nuevo chat" : chat.title;
+        session.status = chat.messages.isEmpty() ? "empty" : (i == active ? "active" : "recent");
+        session.messageCount = chat.messages.size();
+        for (const ChatMessageData &message : chat.messages) {
+            session.attachmentCount += message.attachments.size();
+            if (!message.modelId.isEmpty()) session.model = message.modelId;
+        }
+        if (session.model.isEmpty()) session.model = chat.lastContextModelId;
+        session.timestamp = dashboardTimestamp(chat.updatedAt);
+        result.append(session);
+    }
+    return result;
+}
+
+QVector<DashProject> dashboardProjects(const QVector<ProjectEntry> &projects) {
+    QVector<DashProject> result;
+    result.reserve(projects.size());
+    for (const ProjectEntry &project : projects) {
+        result.append({project.id, project.name, project.stack, project.color,
+                       project.path.isEmpty() ? "Sin directorio" : project.path,
+                       project.lastActive});
+    }
+    return result;
+}
+
+QString projectNameFor(const ProjectView *view, const QString &projectId) {
+    if (view) {
+        for (const ProjectEntry &project : view->projects())
+            if (project.id == projectId) return project.name;
+    }
+    return projectId;
+}
+}
 
 #if defined(Q_OS_WIN)
 #include <windows.h>
@@ -40,15 +101,9 @@
 #endif
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new VoryelCore(this)) {
-    // ── NOTA DE ARQUITECTURA ──
-    // Este constructor centraliza demasiado: crea vistas, conecta señales,
-    // inyecta datos mock y configura Win32. En una refactorización futura:
-    //   - MockDataSource inyectará datos de ejemplo
-    //   - AppController orquestará la creación y conexión de vistas
-    //   - MainWindow solo manejará el layout raíz + frameless window
-    // ─────────────────────────
     setWindowTitle("Voryel");
     setWindowIcon(QIcon(":/icons/icons/Logo-Voryel.ico"));
+    setWindowFlag(Qt::FramelessWindowHint, true);
     resize(1180, 760);
     setMinimumSize(980, 620);
 
@@ -93,36 +148,30 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
     m_stack->setObjectName("pageStack");
     m_stack->setStyleSheet(QString("QStackedWidget#pageStack { background: %1; border: none; }").arg(Style::BG_LILAC));
 
-    const QVector<DashProject> dashProjects = {
-        { "voryel-native", "voryel-native", "Electron", "#7c3aed", "Arreglar error CSS", "hace 5 min" },
-        { "landing-page",  "landing-page",  "Web",      "#0ea5e9", "Deploy a producción", "ayer" },
-        { "api-gateway",   "api-gateway",   "Rust",     "#059669", "Agregar rate limiting", "hace 3 días" },
-    };
-
-    const QVector<ProjectEntry> projectEntries = {
-        { "voryel-native", "voryel-native", "E:/Users/Nadru/Descargas/voryel", "Electron", "#7c3aed", "hace 5 min" },
-        { "landing-page",  "landing-page",  "E:/Users/Nadru/Desktop/loryq-site", "Web", "#0ea5e9", "ayer" },
-        { "api-gateway",   "api-gateway",   "E:/Users/Nadru/Desktop/api-gateway", "Rust", "#059669", "hace 3 días" },
-    };
-
     m_dashboardView = new DashboardView();
     m_dashboardView->setActiveModel(m_activeModel);
-    m_dashboardView->setProjects(dashProjects);
-    m_dashboardView->setSessions({
-        { "s1", "Analizar proyecto",       "completed", "Voryel", 3, "hace 5 min" },
-        { "s2", "Arreglar error CSS",      "active",    "Voryel", 1, "hace 12 min" },
-        { "s3", "Ejecutar npm run build",  "error",     "Voryel", 0, "ayer" },
-    });
+    m_dashboardView->setProjects({});
     m_dashboardView->setWorkflows({
-        { "wf1", ":/icons/icons/cpu.svg",          "Analizar código" },
-        { "wf2", ":/icons/icons/play.svg",         "Ejecutar tests" },
-        { "wf3", ":/icons/icons/check-circle.svg", "Revisar seguridad" },
-        { "wf4", ":/icons/icons/list.svg",         "Generar docs" },
+        { "analyze_code", ":/icons/icons/cpu.svg", "Analizar código",
+          "Revisa código o una explicación técnica y devuelve hallazgos accionables.",
+          "¿Qué archivo, fragmento o comportamiento querés analizar?",
+          "Analizá este contexto técnico. Explicá hallazgos, causas y próximos pasos." },
+        { "test_plan", ":/icons/icons/play.svg", "Preparar pruebas",
+          "Convierte un cambio, error o requisito en un plan de pruebas útil.",
+          "¿Qué cambio querés validar y qué comportamiento esperás? Pegá errores o código si ayudan.",
+          "Prepará un plan de pruebas concreto para este contexto." },
+        { "security_review", ":/icons/icons/check-circle.svg", "Revisar seguridad",
+          "Busca riesgos, impacto y mitigaciones a partir de código o arquitectura proporcionada.",
+          "¿Qué código, endpoint, configuración o flujo querés revisar?",
+          "Hacé una revisión de seguridad sobre este contexto. Priorizá los hallazgos por impacto." },
+        { "write_docs", ":/icons/icons/list.svg", "Generar documentación",
+          "Redacta documentación basada en un módulo, API o comportamiento que proporciones.",
+          "¿Qué componente documentamos y para quién está pensada la documentación?",
+          "Generá documentación útil y precisa a partir de este contexto." },
     });
 
     m_projectView = new ProjectView();
-    m_projectView->setProjects(projectEntries);
-    m_projectView->setActiveProject("voryel-native");
+    m_dashboardView->setProjects(dashboardProjects(m_projectView->projects()));
 
     m_chatView = new ChatView();
     m_chatView->setActiveModel(m_activeModel);
@@ -136,6 +185,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
     m_chatStore = new ChatStore(this);
     m_chatView->setChatStore(m_chatStore);
 
+    const auto syncDashboardSessions = [this]() {
+        m_dashboardView->setSessions(dashboardSessions(m_chatStore));
+    };
+    syncDashboardSessions();
+
     // Update context meter when chat switches
     connect(m_chatStore, &ChatStore::chatSwitched, this, [this](int) {
         updateContextMeterForCurrentChat();
@@ -143,6 +197,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
     connect(m_chatStore, &ChatStore::messagesChanged, this, [this](int) {
         updateContextMeterForCurrentChat();
     });
+    connect(m_chatStore, &ChatStore::chatCreated, this, [syncDashboardSessions](int) { syncDashboardSessions(); });
+    connect(m_chatStore, &ChatStore::chatDeleted, this, [syncDashboardSessions](int) { syncDashboardSessions(); });
+    connect(m_chatStore, &ChatStore::chatSwitched, this, [syncDashboardSessions](int) { syncDashboardSessions(); });
+    connect(m_chatStore, &ChatStore::chatUpdated, this, [syncDashboardSessions](int) { syncDashboardSessions(); });
+    connect(m_chatStore, &ChatStore::messagesChanged, this, [syncDashboardSessions](int) { syncDashboardSessions(); });
 
     m_settingsView = new SettingsView();
     m_settingsView->setActiveModel(m_activeModel);
@@ -151,6 +210,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
 
     // Initialize model display from actual provider config
     updateModelBadges();
+    updateContextMeterForCurrentChat();
 
     connect(m_settingsView, &SettingsView::modelSelected, this, [this](const QString &model) {
         m_activeModel = model.isEmpty() ? "Sin modelo" : model;
@@ -173,34 +233,43 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
 
     connect(m_dashboardView, &DashboardView::chatRequested, this, [this](const QString &prompt, const QString &projectId) {
         if (!projectId.isEmpty()) {
-            m_titleBar->setProjectName(projectId);
+            m_titleBar->setProjectName(projectNameFor(m_projectView, projectId));
             m_projectView->setActiveProject(projectId);
         }
         m_chatView->setDraftPrompt(prompt);
-        m_core->setCurrentTask(prompt.isEmpty() ? "Nueva sesión" : prompt);
-        m_core->setState(CoreState::Thinking);
+        m_core->setCurrentTask(prompt.isEmpty() ? "Nueva sesión lista" : "Workflow preparado para revisar");
+        m_core->setState(CoreState::Idle);
         handleNavigate(View::Chat);
     });
     connect(m_dashboardView, &DashboardView::projectOpened, this, [this](const QString &projectId) {
-        m_titleBar->setProjectName(projectId);
+        m_titleBar->setProjectName(projectNameFor(m_projectView, projectId));
         m_projectView->setActiveProject(projectId);
         handleNavigate(View::Project);
     });
-    connect(m_projectView, &ProjectView::createProjectRequested, this, [this]() {
-        m_core->setCurrentTask("Crear proyecto");
-        m_core->setState(CoreState::Thinking);
-        m_chatView->setDraftPrompt("Crear un nuevo proyecto en Voryel");
-        handleNavigate(View::Chat);
+    connect(m_dashboardView, &DashboardView::sessionOpened, this, [this](const QString &sessionId) {
+        const QVector<ChatSessionData> chats = m_chatStore->chats();
+        for (int i = 0; i < chats.size(); ++i) {
+            if (chats[i].id != sessionId) continue;
+            m_chatStore->switchToChat(i);
+            handleNavigate(View::Chat);
+            break;
+        }
+    });
+    connect(m_projectView, &ProjectView::projectsChanged, this, [this]() {
+        m_dashboardView->setProjects(dashboardProjects(m_projectView->projects()));
+        m_core->setCurrentTask("Proyecto guardado");
+        m_core->setState(CoreState::Idle);
     });
     connect(m_projectView, &ProjectView::projectOpened, this, [this](const QString &projectId) {
-        m_titleBar->setProjectName(projectId);
+        const QString projectName = projectNameFor(m_projectView, projectId);
+        m_titleBar->setProjectName(projectName);
         m_projectView->setActiveProject(projectId);
-        m_core->setCurrentTask(QString("Proyecto abierto: %1").arg(projectId));
+        m_core->setCurrentTask(QString("Proyecto abierto: %1").arg(projectName));
         m_core->setState(CoreState::Idle);
     });
     // ── ChatView → MainWindow (messageSent) ──
     // En real mode: handleRealChatMessage orquesta ChatSession + VoryelCore + ChatView.
-    // En demo mode: el flujo mock vive dentro de ChatView (handleSend internamente).
+    // En modo demo, ChatView administra su flujo local.
     connect(m_chatView, &ChatView::messageSent, this, &MainWindow::handleRealChatMessage);
     connect(m_chatView, &ChatView::cancelRequested, this, [this]() {
         if (m_chatSession)
@@ -214,6 +283,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
         const bool soundOn = m_settingsView->isSoundEnabled();
         if (label == "Voryel está pensando") {
             m_core->setState(CoreState::Thinking);
+            if (soundOn) SoundUtil::play(SoundUtil::Sound::Thinking);
         } else if (label == "Plan listo") {
             m_core->setState(CoreState::AwaitingApproval);
             if (soundOn) SoundUtil::play(SoundUtil::Sound::Complete);
@@ -235,10 +305,29 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
     // ── ChatSession → UI wiring ──
     connect(m_chatSession, &ChatSession::started, this, [this]() {
         qDebug() << "ChatSession::started → setState(Thinking)";
+        m_pendingUsage = {};
+        const ProviderConfig cfg = m_settingsView->providerConfig();
+        m_chatView->reportActivity(QStringLiteral("Enviando la solicitud a %1 · %2")
+            .arg(configuredProviderName(cfg), prettyModelName(cfg.modelId)));
         m_core->setState(CoreState::Thinking);
+        if (m_settingsView->isSoundEnabled())
+            SoundUtil::play(SoundUtil::Sound::Thinking);
     });
     connect(m_chatSession, &ChatSession::tokenReceived, this, [this](const QString &token) {
         m_chatView->appendStreamToken(token);
+    });
+    connect(m_chatSession, &ChatSession::reasoningReceived,
+            m_chatView, &ChatView::appendReasoningSummary);
+    connect(m_chatSession, &ChatSession::usageReceived, this, [this](TokenUsage usage) {
+        const ProviderConfig cfg = m_settingsView->providerConfig();
+        const QString providerId = configuredProviderId(cfg);
+        const ContextWindowInfo context = TokenCounter::resolveContextWindow(
+            cfg.modelId, providerId, cfg.contextWindowTokens,
+            cfg.contextWindowSource);
+        usage.providerId = providerId;
+        usage.modelId = cfg.modelId;
+        usage.contextLimit = context.tokens;
+        m_pendingUsage = usage;
     });
     connect(m_chatSession, &ChatSession::finished, this, [this](const QString &response) {
         if (m_fallbackErrorCount > 0 && !m_originalProviderId.isEmpty()) {
@@ -268,7 +357,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
         m_core->setState(CoreState::Idle);
         if (m_chatStore && !response.isEmpty()) {
             int idx = m_chatStore->activeChatIndex();
-            m_chatStore->addMessage(idx, {"assistant", response});
+            ChatMessageData message;
+            message.role = "assistant";
+            message.content = response;
+            message.usage = m_pendingUsage;
+            m_chatStore->addMessage(idx, message);
         }
         if (m_settingsView->isSoundEnabled())
             SoundUtil::play(SoundUtil::Sound::Complete);
@@ -425,6 +518,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), m_core(new Voryel
             m_core->setState(CoreState::Idle);
         }
     });
+    connect(m_chatSession, &ChatSession::modelsDetectedWithContext, this,
+        [this](const QMap<QString, int> &modelContexts) {
+            ProviderConfig cfg = m_settingsView->providerConfig();
+            const int detected = modelContexts.value(cfg.modelId, 0);
+            if (detected <= 0 || cfg.contextWindowTokens == detected) return;
+            cfg.contextWindowTokens = detected;
+            cfg.contextWindowSource = "provider";
+            m_settingsView->setProviderConfig(cfg);
+            m_chatSession->setProviderConfig(cfg);
+            updateContextMeterForCurrentChat();
+        });
 
     // ── Settings → Provider config sync ──
     connect(m_settingsView, &SettingsView::providerConfigChanged, this, &MainWindow::syncProviderConfig);
@@ -476,6 +580,8 @@ MainWindow::~MainWindow() {
 void MainWindow::handleRealChatMessage(const QString &prompt, const QStringList &attachments) {
     m_lastUserPrompt = prompt;
     m_triedFallbackKeys.clear();
+    const bool skipAutoCompaction = m_skipNextAutoCompaction;
+    m_skipNextAutoCompaction = false;
 
     // ── Handle /compact command ──
     if (prompt.trimmed().startsWith("/compact", Qt::CaseInsensitive)) {
@@ -484,9 +590,16 @@ void MainWindow::handleRealChatMessage(const QString &prompt, const QStringList 
     }
 
     // ── Auto-compaction check: if >=70%, compact first ──
-    if (!m_contextCompacting && m_chatStore) {
+    if (!skipAutoCompaction && !m_contextCompacting && m_chatStore) {
+        updateContextMeterForCurrentChat();
         ChatSessionData *chat = m_chatStore->activeChat();
-        if (chat && chat->compactionPending) {
+        const int pendingTokens = TokenCounter::roughEstimate(prompt);
+        const bool projectedOverflow = chat
+            && chat->lastEstimatedContextMaxTokens > 0
+            && chat->messages.size() > 4
+            && (double(chat->lastEstimatedContextTokens + pendingTokens)
+                / double(chat->lastEstimatedContextMaxTokens)) >= 0.70;
+        if (chat && (chat->compactionPending || projectedOverflow)) {
             compactCurrentChat(prompt, attachments);
             return;
         }
@@ -499,6 +612,7 @@ void MainWindow::handleRealChatMessage(const QString &prompt, const QStringList 
     }
     qDebug() << "MainWindow::handleRealChatMessage: provider config valid, sending to ChatSession";
     m_chatSession->setFallbacksEnabled(m_settingsView->fallbacksEnabled());
+    syncChatSessionHistory();
     if (m_chatStore) {
         int idx = m_chatStore->activeChatIndex();
         qDebug() << "MainWindow::handleRealChatMessage: saving user message to ChatStore, activeChatIndex =" << idx;
@@ -508,9 +622,36 @@ void MainWindow::handleRealChatMessage(const QString &prompt, const QStringList 
         msg.attachments = attachments;
         m_chatStore->addMessage(idx, msg);
     }
-    m_chatView->beginStreaming();
+    m_chatView->beginStreaming(attachments);
     m_chatSession->sendMessage(prompt, attachments);
+    const ProviderConfig activeConfig = m_settingsView->providerConfig();
+    m_chatView->reportActivity(QStringLiteral("Esperando la respuesta de %1")
+        .arg(configuredProviderName(activeConfig)));
     qDebug() << "MainWindow::handleRealChatMessage: sendMessage called, request started";
+}
+
+void MainWindow::syncChatSessionHistory() {
+    if (!m_chatSession || !m_chatStore) return;
+
+    const ChatSessionData *chat = m_chatStore->activeChat();
+    if (!chat) {
+        m_chatSession->replaceHistory({});
+        return;
+    }
+
+    QVector<Message> history;
+    int startIndex = 0;
+    if (!chat->contextSummary.isEmpty() && chat->compactedUpToIndex >= 0) {
+        startIndex = qMin(chat->compactedUpToIndex + 1, chat->messages.size());
+    }
+
+    for (int i = startIndex; i < chat->messages.size(); ++i) {
+        const ChatMessageData &stored = chat->messages[i];
+        if (stored.role != "user" && stored.role != "assistant") continue;
+        history.append({stored.role, stored.content, {}});
+    }
+
+    m_chatSession->replaceHistory(history, chat->contextSummary);
 }
 
 void MainWindow::syncProviderConfig() {
@@ -518,7 +659,7 @@ void MainWindow::syncProviderConfig() {
     m_chatSession->setProviderConfig(cfg);
     m_chatView->setDemoMode(!cfg.valid());
     if (cfg.valid()) {
-        m_core->setCurrentTask("Proveedor local conectado: " + cfg.baseUrl);
+        m_core->setCurrentTask("Proveedor conectado: " + configuredProviderName(cfg));
     }
     updateModelBadges();
     updateContextMeterForCurrentChat();
@@ -547,98 +688,121 @@ void MainWindow::updateContextMeterForCurrentChat() {
     if (!m_chatStore || !m_settingsView || !m_chatSession) return;
     ProviderConfig cfg = m_settingsView->providerConfig();
     if (!cfg.valid()) {
-        m_chatView->updateContextMeter(0, 32768, "-", "-", "-");
+        m_chatView->updateContextUsage({}, 0, QString(), QString(), QString());
         return;
     }
 
     // Resolve context window
-    QString providerId = PromptBuilder::detectProviderId(cfg.baseUrl);
+    QString providerId = configuredProviderId(cfg);
     ContextWindowInfo winfo = TokenCounter::resolveContextWindow(
-        cfg.modelId, providerId, cfg.contextWindowTokens);
+        cfg.modelId, providerId, cfg.contextWindowTokens,
+        cfg.contextWindowSource);
 
     // Count messages that would be sent
     ChatSessionData *chat = m_chatStore->activeChat();
     if (!chat) {
-        m_chatView->updateContextMeter(0, winfo.tokens, PromptBuilder::providerDisplayNameFromUrl(cfg.baseUrl), cfg.modelId, winfo.source);
         return;
     }
 
-    // System prompt + envelope overhead
-    int totalTokens = 0;
-    totalTokens += TokenCounter::roughEstimate(
-        QStringLiteral("Respond\u00e9s dentro de Voryel.\n\nIDENTIDAD:\n...\nNo inventes identidad, modelo ni capacidades."));
+    // Preflight estimate. Provider-reported usage remains the UI source of truth
+    // once a completed response contains usage metadata.
+    int estimatedTokens = 0;
+    estimatedTokens += TokenCounter::roughEstimate(ChatSession::systemPrompt());
 
     // Current envelope estimate
     TaskEnvelopeParams dummyEnv;
     dummyEnv.mode = "chat";
-    dummyEnv.activeProvider = PromptBuilder::providerDisplayNameFromUrl(cfg.baseUrl);
+    dummyEnv.activeProvider = configuredProviderName(cfg);
     dummyEnv.activeModel = cfg.modelId;
     dummyEnv.providerId = providerId;
     dummyEnv.modelId = cfg.modelId;
     dummyEnv.userMessage = "x"; // minimal
     QString env = PromptBuilder::buildEnvelope(dummyEnv);
     int envelopeBase = TokenCounter::roughEstimate(env) - 1;
-    totalTokens += envelopeBase;
+    estimatedTokens += envelopeBase;
 
     // Context summary (if compacted)
     if (!chat->contextSummary.isEmpty()) {
-        totalTokens += TokenCounter::roughEstimate(chat->contextSummary);
-        totalTokens += TokenCounter::roughEstimate(
+        estimatedTokens += TokenCounter::roughEstimate(chat->contextSummary);
+        estimatedTokens += TokenCounter::roughEstimate(
             "Resumen compacto de la conversaci\u00f3n hasta este punto:");
     }
 
     // Messages to send
-    // If compacted, only send from compactedUpToIndex onwards (last 8-12 exact)
+    // If compacted, only the summary plus messages after the compacted range
+    // are sent to the model. The complete history stays visible in ChatStore.
     int startIdx = 0;
     if (chat->compactedUpToIndex >= 0) {
-        startIdx = qMax(chat->compactedUpToIndex,
-                        chat->messages.size() - 12);
+        startIdx = qMin(chat->compactedUpToIndex + 1, chat->messages.size());
     }
     for (int i = startIdx; i < chat->messages.size(); ++i) {
-        totalTokens += TokenCounter::roughEstimate(chat->messages[i].content);
-        totalTokens += 8; // role + overhead
+        estimatedTokens += TokenCounter::roughEstimate(chat->messages[i].content);
+        estimatedTokens += 8; // role + message overhead
     }
 
-    // Reserved output
-    int reservedOutput = 2048;
-    totalTokens += reservedOutput;
-
-    // Cap at max
     int maxTokens = winfo.tokens;
-    int displayTokens = qMin(totalTokens, maxTokens);
+    TokenUsage latestReported;
+    const QDateTime compactedAt = QDateTime::fromString(
+        chat->compactionCreatedAt, Qt::ISODate);
+    for (int i = chat->messages.size() - 1; i >= 0; --i) {
+        if (chat->messages[i].role == "assistant" && chat->messages[i].usage.valid()) {
+            const TokenUsage &candidate = chat->messages[i].usage;
+            const QDateTime usageAt = QDateTime::fromString(candidate.timestamp, Qt::ISODate);
+            if (!compactedAt.isValid() || (usageAt.isValid() && usageAt >= compactedAt)) {
+                latestReported = candidate;
+                break;
+            }
+        }
+    }
+
+    TokenUsage displayUsage = latestReported;
+    if (!displayUsage.valid() && !chat->messages.isEmpty()) {
+        displayUsage.input = estimatedTokens;
+        displayUsage.contextLimit = maxTokens;
+        displayUsage.providerId = providerId;
+        displayUsage.modelId = cfg.modelId;
+        displayUsage.source = "estimated";
+    }
+    displayUsage.contextLimit = maxTokens;
+
+    // Compaction uses the safer of the last provider measurement and the
+    // preflight estimate, since new local messages are not in the prior usage.
+    const qint64 safetyTokens = qMax<qint64>(estimatedTokens, displayUsage.total());
 
     // Store in chat session data
-    chat->lastEstimatedContextTokens = displayTokens;
+    chat->lastEstimatedContextTokens = maxTokens > 0
+        ? qMin<qint64>(safetyTokens, maxTokens) : safetyTokens;
     chat->lastEstimatedContextMaxTokens = maxTokens;
     chat->lastContextProviderId = providerId;
     chat->lastContextModelId = cfg.modelId;
-    chat->tokenEstimateAccuracy = winfo.source;
+    chat->tokenEstimateAccuracy = displayUsage.source;
 
     // Check compaction threshold
-    double pct = maxTokens > 0 ? (double)displayTokens / maxTokens * 100.0 : 0.0;
+    double pct = maxTokens > 0 ? (double)safetyTokens / maxTokens * 100.0 : 0.0;
     chat->compactionPending = (pct >= 70.0 && chat->messages.size() > 6);
 
-    // Update meter
-    QString accuracyLabel;
-    if (winfo.source == "provider")          accuracyLabel = "exacta";
-    else if (winfo.source == "local_catalog") accuracyLabel = "informada por proveedor";
-    else if (winfo.source == "user_manual")   accuracyLabel = "exacta";
-    else                                       accuracyLabel = "estimada";
+    QString limitSource = winfo.source;
+    if (limitSource == "configured") limitSource = "Proveedor o configuración";
+    else if (limitSource == "models.dev") limitSource = "models.dev";
+    else if (limitSource == "local_catalog") limitSource = "Catálogo de modelo exacto";
+    else if (limitSource == "provider") limitSource = "Proveedor";
+    else limitSource = "No informado";
 
-    m_chatView->updateContextMeter(displayTokens, maxTokens,
-                                    PromptBuilder::providerDisplayNameFromUrl(cfg.baseUrl),
-                                    cfg.modelId, accuracyLabel, chat->compactionPending);
+    m_chatView->updateContextUsage(displayUsage, maxTokens,
+        configuredProviderName(cfg), cfg.modelId,
+        limitSource, chat->compactionPending);
+    m_chatStore->save();
 
     qDebug() << "ContextMeter: chatId=" << chat->id.left(16)
              << "providerId=" << providerId
              << "modelId=" << cfg.modelId
              << "contextWindowTokens=" << winfo.tokens
              << "contextWindowSource=" << winfo.source
-             << "estimatedInputTokens=" << (displayTokens - reservedOutput)
-             << "reservedOutputTokens=" << reservedOutput
-             << "totalContextTokens=" << displayTokens
+             << "estimatedContextTokens=" << estimatedTokens
+             << "reportedContextTokens=" << latestReported.total()
+             << "safetyContextTokens=" << safetyTokens
              << "usagePercent=" << QString::number(pct, 'f', 1)
-             << "accuracy=" << accuracyLabel;
+             << "accuracy=" << winfo.source;
 }
 
 void MainWindow::compactCurrentChat(const QString &userPendingMessage, const QStringList &pendingAttachments) {
@@ -654,20 +818,55 @@ void MainWindow::compactCurrentChat(const QString &userPendingMessage, const QSt
     m_chatView->setCoreState(CoreState::Thinking);
     if (m_bottomBar) m_bottomBar->setCurrentTask("Compactando contexto...");
 
-    QString oldMessages;
-    for (int i = 0; i < chat->messages.size(); ++i) {
-        const auto &msg = chat->messages[i];
-        oldMessages += msg.role + ": " + msg.content.left(500) + "\n---\n";
+    ProviderConfig cfg = m_settingsView->providerConfig();
+    const QString providerId = configuredProviderId(cfg);
+    const ContextWindowInfo contextWindow = TokenCounter::resolveContextWindow(
+        cfg.modelId, providerId, cfg.contextWindowTokens,
+        cfg.contextWindowSource);
+    const int targetTokens = qMax(800, qRound(contextWindow.tokens * 0.12));
+
+    // Keep a small exact tail. If those messages are unusually large, reduce
+    // it from four to two so the compacted context can approach 10–15%.
+    int compactEnd = qMax(0, chat->messages.size() - 5);
+    auto recentTokenCount = [chat](int first) {
+        int total = 0;
+        for (int i = first; i < chat->messages.size(); ++i)
+            total += TokenCounter::roughEstimate(chat->messages[i].content) + 8;
+        return total;
+    };
+    int recentTokens = recentTokenCount(compactEnd + 1);
+    while (compactEnd < chat->messages.size() - 3
+           && recentTokens > qRound(targetTokens * 0.55)) {
+        ++compactEnd;
+        recentTokens = recentTokenCount(compactEnd + 1);
     }
 
-    ProviderConfig cfg = m_settingsView->providerConfig();
+    QString oldMessages;
+    if (!chat->contextSummary.isEmpty()) {
+        oldMessages += "RESUMEN COMPACTO ANTERIOR:\n" + chat->contextSummary
+                    + "\n\nNUEVOS MENSAJES A INCORPORAR:\n";
+    }
+    const int firstNotYetCompacted = qMax(0, chat->compactedUpToIndex + 1);
+    for (int i = firstNotYetCompacted; i <= compactEnd && i < chat->messages.size(); ++i) {
+        const auto &msg = chat->messages[i];
+        oldMessages += msg.role + ":\n" + msg.content + "\n---\n";
+    }
+
+    const int baseContextTokens = TokenCounter::roughEstimate(ChatSession::systemPrompt()) + 160;
+    const int summaryBudget = qBound(256,
+        targetTokens - recentTokens - baseContextTokens,
+        qMax(256, qMin(4096, targetTokens / 2)));
+
     TaskEnvelopeParams envParams;
     envParams.mode = "compact_session";
-    envParams.activeProvider = PromptBuilder::providerDisplayNameFromUrl(cfg.baseUrl);
+    envParams.activeProvider = configuredProviderName(cfg);
     envParams.activeModel = cfg.modelId;
-    envParams.providerId = PromptBuilder::detectProviderId(cfg.baseUrl);
+    envParams.providerId = providerId;
     envParams.modelId = cfg.modelId;
-    envParams.userMessage = oldMessages;
+    envParams.userMessage = QString(
+        "Generá un único resumen operativo de no más de %1 tokens. "
+        "Integrá el resumen anterior si existe y evitá duplicaciones.\n\n%2")
+        .arg(summaryBudget).arg(oldMessages);
 
     QString compactPrompt = PromptBuilder::buildEnvelope(envParams);
     int beforeTokens = chat->lastEstimatedContextTokens;
@@ -681,15 +880,19 @@ void MainWindow::compactCurrentChat(const QString &userPendingMessage, const QSt
     // Temporary OpenAIClient for the compact request
     auto *compactClient = new OpenAIClient(this);
     connect(compactClient, &OpenAIClient::finished, this,
-        [this, compactClient, chat, userPendingMessage, pendingAttachments, beforeTokens](const QString &response) {
+        [this, compactClient, chat, userPendingMessage, pendingAttachments,
+         beforeTokens, compactEnd, recentTokens, baseContextTokens](const QString &response) {
             compactClient->deleteLater();
 
-            chat->contextSummary = response;
-            chat->compactedUpToIndex = chat->messages.size() - 1;
+            chat->contextSummary = PromptBuilder::cleanModelResponse(response);
+            chat->compactedUpToIndex = compactEnd;
             chat->compactionCreatedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
             chat->compactionPending = false;
             chat->estimatedTokensBeforeCompaction = beforeTokens;
-            chat->estimatedTokensAfterCompaction = beforeTokens / 3;
+            chat->estimatedTokensAfterCompaction =
+                TokenCounter::roughEstimate(chat->contextSummary) + recentTokens + baseContextTokens;
+
+            m_chatStore->save();
 
             m_contextCompacting = false;
             m_core->setCurrentTask("Contexto compactado");
@@ -698,8 +901,10 @@ void MainWindow::compactCurrentChat(const QString &userPendingMessage, const QSt
 
             updateContextMeterForCurrentChat();
 
-            if (!userPendingMessage.isEmpty() || !pendingAttachments.isEmpty())
+            if (!userPendingMessage.isEmpty() || !pendingAttachments.isEmpty()) {
+                m_skipNextAutoCompaction = true;
                 handleRealChatMessage(userPendingMessage, pendingAttachments);
+            }
         });
     connect(compactClient, &OpenAIClient::errorOccurred, this,
         [this, compactClient, chat, userPendingMessage, pendingAttachments](const QString &) {
@@ -709,11 +914,15 @@ void MainWindow::compactCurrentChat(const QString &userPendingMessage, const QSt
             m_core->setState(CoreState::Idle);
             if (m_bottomBar) m_bottomBar->setCurrentTask("");
 
-            if (!userPendingMessage.isEmpty() || !pendingAttachments.isEmpty())
+            if (!userPendingMessage.isEmpty() || !pendingAttachments.isEmpty()) {
+                m_skipNextAutoCompaction = true;
                 handleRealChatMessage(userPendingMessage, pendingAttachments);
+            }
         });
 
-    compactClient->sendChatCompletion(compactMessages, cfg);
+    ProviderConfig compactConfig = cfg;
+    compactConfig.maxOutputTokens = summaryBudget;
+    compactClient->sendChatCompletion(compactMessages, compactConfig);
 }
 
 void MainWindow::showFallbackNotification(const QString &oldModel, const QString &newModel) {

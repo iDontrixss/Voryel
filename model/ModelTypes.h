@@ -3,6 +3,27 @@
 #include <QStringList>
 #include <QVector>
 
+struct TokenUsage {
+    qint64 input = 0;
+    qint64 output = 0;
+    qint64 reasoning = 0;
+    qint64 cacheRead = 0;
+    qint64 cacheWrite = 0;
+    qint64 providerTotal = 0;
+    qint64 contextLimit = 0;
+    QString providerId;
+    QString modelId;
+    QString source; // provider_reported | estimated
+    QString timestamp;
+
+    qint64 total() const {
+        const qint64 normalized = input + output + reasoning + cacheRead + cacheWrite;
+        return normalized > 0 ? normalized : providerTotal;
+    }
+    bool valid() const { return total() > 0; }
+    bool reported() const { return source == "provider_reported"; }
+};
+
 struct Message {
     QString role;
     QString content;
@@ -13,8 +34,12 @@ struct ProviderConfig {
     QString baseUrl  = "http://localhost:1234/v1";
     QString apiKey;
     QString modelId;
+    QString providerId;
+    QString providerName;
     bool streaming   = true;
     int contextWindowTokens = 0; // 0=unknown, will use catalog/default
+    QString contextWindowSource; // provider | models.dev | configured
+    int maxOutputTokens = 0; // 0=provider default
     bool valid() const { return !baseUrl.isEmpty() && !modelId.isEmpty(); }
 };
 
@@ -87,8 +112,10 @@ inline QString providerDisplay(const ProviderConfig &cfg, bool demoMode = false)
 
     // Detect provider from baseUrl
     QString baseUrl = cfg.baseUrl.toLower();
-    QString provider;
-    if (baseUrl.contains("127.0.0.1:1234") || baseUrl.contains("localhost:1234"))
+    QString provider = cfg.providerName.trimmed();
+    if (!provider.isEmpty()) {
+        // Keep the user-defined provider name.
+    } else if (baseUrl.contains("127.0.0.1:1234") || baseUrl.contains("localhost:1234"))
         provider = "LM Studio";
     else if (baseUrl.contains("11434"))
         provider = "Ollama";
@@ -97,7 +124,9 @@ inline QString providerDisplay(const ProviderConfig &cfg, bool demoMode = false)
     else if (baseUrl.contains("openrouter"))
         provider = "OpenRouter";
     else if (baseUrl.contains("generativelanguage.googleapis.com"))
-        provider = "Gemini";
+        provider = "Google";
+    else if (baseUrl.contains("api.anthropic.com"))
+        provider = "Anthropic";
     else
         provider = "Custom";
 

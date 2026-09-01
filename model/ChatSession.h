@@ -10,6 +10,8 @@ class ChatSession : public QObject {
 public:
     explicit ChatSession(QObject *parent = nullptr);
 
+    static QString systemPrompt();
+
     void setProviderConfig(const ProviderConfig &config);
     ProviderConfig providerConfig() const { return m_config; }
     bool isConfigured() const { return m_config.valid(); }
@@ -18,6 +20,8 @@ public:
     bool fallbacksEnabled() const { return m_fallbacksEnabled; }
 
     void sendMessage(const QString &text, const QStringList &attachments = QStringList());
+    void replaceHistory(const QVector<Message> &messages,
+                        const QString &contextSummary = QString());
     void cancel();
     void clear();
     void detectModels(const QString &baseUrl);
@@ -25,6 +29,8 @@ public:
 signals:
     void started();
     void tokenReceived(const QString &token);
+    void reasoningReceived(const QString &summaryDelta);
+    void usageReceived(const TokenUsage &usage);
     void finished(const QString &fullResponse);
     void errorOccurred(const QString &message);
     void cancelled();

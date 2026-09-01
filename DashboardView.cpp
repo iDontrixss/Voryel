@@ -2,6 +2,7 @@
 #include "Style.h"
 #include "SolidPanel.h"
 #include "IconUtil.h"
+#include "VoryelDialog.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -14,6 +15,8 @@
 #include <QMouseEvent>
 #include <QSizePolicy>
 #include <QTimer>
+#include <QDialogButtonBox>
+#include <QPlainTextEdit>
 
 namespace {
 
@@ -140,7 +143,7 @@ DashboardView::DashboardView(QWidget *parent) : QWidget(parent) {
     };
     m_tabProjects = makeTabButton("Proyectos");
     m_tabSessions = makeTabButton("Sesiones");
-    m_tabHistory = makeTabButton("Historial");
+    m_tabHistory = makeTabButton("Workflows");
     tabsLayout->addWidget(m_tabProjects);
     tabsLayout->addWidget(m_tabSessions);
     tabsLayout->addWidget(m_tabHistory);
@@ -202,18 +205,26 @@ DashboardView::DashboardView(QWidget *parent) : QWidget(parent) {
 bool DashboardView::eventFilter(QObject *watched, QEvent *event) {
     if (event->type() == QEvent::MouseButtonRelease) {
         auto *card = qobject_cast<QWidget*>(watched);
-        if (card && card->property("wfPrompt").isValid()) {
-            emit chatRequested(card->property("wfPrompt").toString(), QString());
-            return true;
+        const QString workflowId = card ? card->property("workflowId").toString() : QString();
+        if (!workflowId.isEmpty()) {
+            for (const DashWorkflow &workflow : m_workflows) {
+                if (workflow.id == workflowId) {
+                    prepareWorkflow(workflow);
+                    return true;
+                }
+            }
         }
     }
     return QWidget::eventFilter(watched, event);
 }
 
 void DashboardView::setActiveModel(const QString &model) {
-    // El modelo visible vive en el badge de la TopBar y en Configuración.
-    // Dashboard solo guarda el estado por si después necesita filtrar sesiones.
     m_activeModel = model.isEmpty() ? "Sin modelo" : model;
+    if (m_modelLine) {
+        m_modelLine->setText(m_activeModel == "Sin modelo"
+            ? "Conversaciones guardadas y workflows preparados con contexto."
+            : "Modelo activo: " + m_activeModel);
+    }
 }
 
 
@@ -302,7 +313,10 @@ void DashboardView::rebuildStats() {
     clearLayout(m_statsRow);
     m_statsRow->addWidget(makeStatCard(":/icons/icons/folder.svg", Style::VIOLET, QString::number(m_projects.size()), "Proyectos"), 1);
     m_statsRow->addWidget(makeStatCard(":/icons/icons/message.svg", "#0ea5e9", QString::number(m_sessions.size()), "Sesiones"), 1);
-    m_statsRow->addWidget(makeStatCard(":/icons/icons/check-circle.svg", Style::GREEN, "17", "Archivos editados"), 1);
+    int attachments = 0;
+    for (const auto &session : m_sessions) attachments += session.attachmentCount;
+    m_statsRow->addWidget(makeStatCard(":/icons/icons/file-text.svg", Style::GREEN,
+                                        QString::number(attachments), "Archivos adjuntos"), 1);
 }
 
 QWidget* DashboardView::makeWorkflowQuickCard(const DashWorkflow &wf) {
@@ -313,7 +327,7 @@ QWidget* DashboardView::makeWorkflowQuickCard(const DashWorkflow &wf) {
     card->setHardShadow(QColor(Style::INK), 2, 2);
     card->setHoverEffect(true);
     card->setCursor(Qt::PointingHandCursor);
-    card->setProperty("wfPrompt", wf.label);
+    card->setProperty("workflowId", wf.id);
 
     auto *cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(10, 9, 12, 11);
@@ -323,7 +337,6 @@ QWidget* DashboardView::makeWorkflowQuickCard(const DashWorkflow &wf) {
     lbl->setWordWrap(true);
     lbl->setStyleSheet(QString("font-size: 11px; font-weight: 800; color: %1; border: none;").arg(Style::INK));
     cardLayout->addWidget(lbl);
-
     card->installEventFilter(this);
     return card;
 }
@@ -343,7 +356,7 @@ QWidget* DashboardView::makeWorkflowFullCard(const DashWorkflow &wf) {
     card->setHardShadow(QColor(Style::INK), 3, 3);
     card->setHoverEffect(true);
     card->setCursor(Qt::PointingHandCursor);
-    card->setProperty("wfPrompt", wf.label);
+    card->setProperty("workflowId", wf.id);
 
     auto *cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(16, 14, 19, 17);
@@ -351,13 +364,69 @@ QWidget* DashboardView::makeWorkflowFullCard(const DashWorkflow &wf) {
     cardLayout->addWidget(makeIconLabel(wf.iconRes, QColor(Style::WHITE), 36, 17, Style::VIOLET, 10));
     auto *lbl = new QLabel(wf.label);
     lbl->setStyleSheet(QString("font-size: 13px; font-weight: 800; color: %1; border: none;").arg(Style::INK));
-    auto *sub = new QLabel("Ejecutar en el proyecto activo");
+    auto *sub = new QLabel(wf.description);
+    sub->setWordWrap(true);
     sub->setStyleSheet(QString("font-size: 11px; color: %1; border: none;").arg(Style::TEXT_MUTED));
     cardLayout->addWidget(lbl);
     cardLayout->addWidget(sub);
-
+    auto *prepareBtn = makeGhostButton("Preparar workflow");
+    connect(prepareBtn, &QPushButton::clicked, this, [this, wf]() { prepareWorkflow(wf); });
+    cardLayout->addWidget(prepareBtn, 0, Qt::AlignLeft);
     card->installEventFilter(this);
     return card;
+}
+
+void DashboardView::prepareWorkflow(const DashWorkflow &workflow) {
+    VoryelDialog dialog(workflow.label, this);
+    dialog.setMinimumWidth(500);
+    auto *bodyLayout = dialog.bodyLayout();
+    auto *title = new QLabel(workflow.label);
+    title->setStyleSheet(QString("font-size: 18px; font-weight: 900; color: %1; border: none;").arg(Style::INK));
+    bodyLayout->addWidget(title);
+    auto *description = new QLabel(workflow.description);
+    description->setWordWrap(true);
+    description->setStyleSheet(QString("font-size: 12px; color: %1; border: none;").arg(Style::TEXT_MUTED));
+    bodyLayout->addWidget(description);
+    auto *question = new QLabel(workflow.question);
+    question->setWordWrap(true);
+    question->setStyleSheet(QString("font-size: 12px; font-weight: 800; color: %1; border: none;").arg(Style::INK));
+    bodyLayout->addWidget(question);
+
+    auto *context = new QPlainTextEdit(&dialog);
+    context->setPlaceholderText("Pegá el código, el error, una descripción o el contexto necesario...");
+    context->setMinimumHeight(150);
+    context->setStyleSheet(QString(
+        "QPlainTextEdit { background: %1; color: %2; border: 2px solid %3; border-radius: 10px;"
+        " padding: 9px; font-size: 12px; } QPlainTextEdit:focus { border-color: %4; }"
+    ).arg(Style::WHITE, Style::INK, Style::INK, Style::VIOLET));
+    bodyLayout->addWidget(context);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, &dialog);
+    auto *cancel = buttons->button(QDialogButtonBox::Cancel);
+    cancel->setText("Cancelar");
+    cancel->setCursor(Qt::PointingHandCursor);
+    cancel->setStyleSheet(QString(
+        "QPushButton { background: white; color: %1; border: 2px solid %1; border-radius: 8px;"
+        " padding: 7px 13px; font-weight: 850; } QPushButton:hover { background: #e5d3ff; }"
+    ).arg(Style::INK));
+    auto *openChat = buttons->addButton("Abrir en chat", QDialogButtonBox::AcceptRole);
+    openChat->setEnabled(false);
+    openChat->setCursor(Qt::PointingHandCursor);
+    openChat->setStyleSheet(QString(
+        "QPushButton { background: %1; color: white; border: 2px solid %2; border-radius: 8px;"
+        " padding: 7px 13px; font-weight: 900; } QPushButton:disabled { background: #c4b5fd; color: #f5f3ff; }"
+    ).arg(Style::VIOLET, Style::INK));
+    connect(context, &QPlainTextEdit::textChanged, &dialog, [context, openChat]() {
+        openChat->setEnabled(!context->toPlainText().trimmed().isEmpty());
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(openChat, &QPushButton::clicked, &dialog, &QDialog::accept);
+    bodyLayout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) return;
+    const QString suppliedContext = context->toPlainText().trimmed();
+    if (suppliedContext.isEmpty()) return;
+    emit chatRequested(workflow.promptPrefix + "\n\nContexto proporcionado:\n" + suppliedContext, QString());
 }
 
 void DashboardView::triggerInitialAnimations() {
@@ -414,7 +483,7 @@ QWidget* DashboardView::makeProjectRow(const DashProject &p) {
     nameRow->addStretch();
     infoCol->addLayout(nameRow);
 
-    auto *taskLbl = new QLabel(QString("Última tarea: %1").arg(p.lastTask));
+    auto *taskLbl = new QLabel(QString("Directorio: %1").arg(p.lastTask));
     taskLbl->setStyleSheet(QString("font-size: 11px; color: %1; border: none;").arg(Style::TEXT_MUTED));
     infoCol->addWidget(taskLbl);
 
@@ -454,8 +523,23 @@ QWidget* DashboardView::makeProjectRow(const DashProject &p) {
 void DashboardView::rebuildProjectsTab() {
     QLayoutItem *stretchItem = m_projectsListLayout->takeAt(m_projectsListLayout->count() - 1);
     clearLayout(m_projectsListLayout);
-    for (const auto &p : m_projects) {
-        m_projectsListLayout->addWidget(makeProjectRow(p));
+    if (m_projects.isEmpty()) {
+        auto *empty = new SolidPanel();
+        empty->setFillColor(QColor(Style::WHITE));
+        empty->setCornerRadius(12);
+        empty->setFullBorder(QColor(Style::INK), 2);
+        empty->setHardShadow(QColor(Style::INK), 2, 2);
+        auto *emptyLayout = new QVBoxLayout(empty);
+        emptyLayout->setContentsMargins(16, 14, 18, 16);
+        emptyLayout->addWidget(new QLabel("No hay proyectos vinculados todavía."));
+        auto *detail = new QLabel("Creá un proyecto desde la sección Proyectos para verlo acá.");
+        detail->setWordWrap(true);
+        detail->setStyleSheet(QString("font-size: 11px; color: %1; border: none;").arg(Style::TEXT_MUTED));
+        emptyLayout->addWidget(detail);
+        m_projectsListLayout->addWidget(empty);
+    } else {
+        for (const auto &p : m_projects)
+            m_projectsListLayout->addWidget(makeProjectRow(p));
     }
     if (stretchItem) m_projectsListLayout->addItem(stretchItem);
     else m_projectsListLayout->addStretch();
@@ -481,9 +565,9 @@ QWidget* DashboardView::makeSessionRow(const DashSession &s) {
     titleRow->addWidget(titleLbl);
 
     QString badgeText, badgeBg, badgeFg;
-    if (s.status == "completed") { badgeText = "completado"; badgeBg = "#d1fae5"; badgeFg = "#065f46"; }
-    else if (s.status == "active") { badgeText = "activo"; badgeBg = "#ede9fe"; badgeFg = Style::VIOLET; }
-    else { badgeText = "error"; badgeBg = "#fee2e2"; badgeFg = "#991b1b"; }
+    if (s.status == "active") { badgeText = "activa"; badgeBg = "#ede9fe"; badgeFg = Style::VIOLET; }
+    else if (s.status == "empty") { badgeText = "vacía"; badgeBg = "#f3f4f6"; badgeFg = Style::TEXT_MUTED; }
+    else { badgeText = "reciente"; badgeBg = "#d1fae5"; badgeFg = "#065f46"; }
     auto *badge = new QLabel(badgeText);
     badge->setAttribute(Qt::WA_StyledBackground, true);
     badge->setStyleSheet(QString(
@@ -496,17 +580,26 @@ QWidget* DashboardView::makeSessionRow(const DashSession &s) {
     auto *metaRow = new QHBoxLayout();
     metaRow->setSpacing(12);
     metaRow->addWidget(makeIconLabel(":/icons/icons/file-text.svg", QColor(Style::TEXT_MUTED), 12, 10, "transparent", 0, false));
-    auto *filesLbl = new QLabel(QString("%1 archivos").arg(s.filesChanged));
+    auto *filesLbl = new QLabel(QString("%1 mensajes · %2 adjuntos")
+                                .arg(s.messageCount).arg(s.attachmentCount));
     filesLbl->setStyleSheet(QString("font-size: 10px; color: %1; border: none;").arg(Style::TEXT_MUTED));
     auto *timeLbl = new QLabel(s.timestamp);
     timeLbl->setStyleSheet(QString("font-size: 10px; color: %1; border: none;").arg(Style::TEXT_MUTED));
     metaRow->addWidget(filesLbl);
+    if (!s.model.isEmpty()) {
+        auto *modelLbl = new QLabel(s.model);
+        modelLbl->setToolTip(s.model);
+        modelLbl->setStyleSheet(QString("font-size: 10px; color: %1; border: none;").arg(Style::TEXT_MUTED));
+        metaRow->addWidget(modelLbl);
+    }
     metaRow->addWidget(timeLbl);
     metaRow->addStretch();
     infoCol->addLayout(metaRow);
 
     rowLayout->addLayout(infoCol, 1);
-    rowLayout->addWidget(makeGhostButton("Ver sesión"));
+    auto *open = makeGhostButton("Abrir chat");
+    connect(open, &QPushButton::clicked, this, [this, id = s.id]() { emit sessionOpened(id); });
+    rowLayout->addWidget(open);
 
     return card;
 }
@@ -514,8 +607,13 @@ QWidget* DashboardView::makeSessionRow(const DashSession &s) {
 void DashboardView::rebuildSessionsTab() {
     QLayoutItem *stretchItem = m_sessionsListLayout->takeAt(m_sessionsListLayout->count() - 1);
     clearLayout(m_sessionsListLayout);
-    for (const auto &s : m_sessions) {
-        m_sessionsListLayout->addWidget(makeSessionRow(s));
+    if (m_sessions.isEmpty()) {
+        auto *empty = new QLabel("Todavía no hay conversaciones guardadas.");
+        empty->setStyleSheet(QString("font-size: 12px; color: %1; border: none;").arg(Style::TEXT_MUTED));
+        m_sessionsListLayout->addWidget(empty);
+    } else {
+        for (const auto &s : m_sessions)
+            m_sessionsListLayout->addWidget(makeSessionRow(s));
     }
     if (stretchItem) m_sessionsListLayout->addItem(stretchItem);
     else m_sessionsListLayout->addStretch();

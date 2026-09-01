@@ -174,6 +174,21 @@ void ChatStore::save() {
                 }
                 msgObj["attachments"] = attachmentsArray;
             }
+            if (msg.usage.valid()) {
+                QJsonObject usageObj;
+                usageObj["input"] = static_cast<double>(msg.usage.input);
+                usageObj["output"] = static_cast<double>(msg.usage.output);
+                usageObj["reasoning"] = static_cast<double>(msg.usage.reasoning);
+                usageObj["cacheRead"] = static_cast<double>(msg.usage.cacheRead);
+                usageObj["cacheWrite"] = static_cast<double>(msg.usage.cacheWrite);
+                usageObj["providerTotal"] = static_cast<double>(msg.usage.providerTotal);
+                usageObj["contextLimit"] = static_cast<double>(msg.usage.contextLimit);
+                usageObj["providerId"] = msg.usage.providerId;
+                usageObj["modelId"] = msg.usage.modelId;
+                usageObj["source"] = msg.usage.source;
+                usageObj["timestamp"] = msg.usage.timestamp;
+                msgObj["usage"] = usageObj;
+            }
             msgsArray.append(msgObj);
         }
         chatObj["messages"] = msgsArray;
@@ -251,6 +266,20 @@ void ChatStore::load() {
                     const QString name = QFileInfo(attachment).fileName();
                     msg.attachments.append(name.isEmpty() ? attachment : name);
                 }
+            }
+            const QJsonObject usageObj = msgObj["usage"].toObject();
+            if (!usageObj.isEmpty()) {
+                msg.usage.input = static_cast<qint64>(usageObj["input"].toDouble());
+                msg.usage.output = static_cast<qint64>(usageObj["output"].toDouble());
+                msg.usage.reasoning = static_cast<qint64>(usageObj["reasoning"].toDouble());
+                msg.usage.cacheRead = static_cast<qint64>(usageObj["cacheRead"].toDouble());
+                msg.usage.cacheWrite = static_cast<qint64>(usageObj["cacheWrite"].toDouble());
+                msg.usage.providerTotal = static_cast<qint64>(usageObj["providerTotal"].toDouble());
+                msg.usage.contextLimit = static_cast<qint64>(usageObj["contextLimit"].toDouble());
+                msg.usage.providerId = usageObj["providerId"].toString();
+                msg.usage.modelId = usageObj["modelId"].toString();
+                msg.usage.source = usageObj["source"].toString();
+                msg.usage.timestamp = usageObj["timestamp"].toString();
             }
             chat.messages.append(msg);
         }

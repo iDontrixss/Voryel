@@ -9,6 +9,7 @@
 #include <QMap>
 #include "Views.h"
 #include "core/VoryelCore.h"
+#include "model/ModelTypes.h"
 #include <QColor>
 
 class Sidebar;
@@ -36,7 +37,7 @@ class ChatStore;
 // 6. Bridge DashboardView/ProjectView → ChatView + navegación
 // 7. Taskbar overlay Win32 (ITaskbarList3, HICON, timer 5s)
 // 8. Model popover (showModelPopover)
-// 9. Datos mock (dashProjects, projectEntries, sessions, workflows)
+// 9. Datos del dashboard (proyectos, sesiones y workflows)
 //
 // SEPARACIÓN FUTURA (gradual, sin refactor masivo):
 //   a) TaskbarOverlayManager  → #7 (completo: HICON, pulse, flash, timer)
@@ -111,11 +112,14 @@ private:
     QTimer *m_fallbackCardTimer = nullptr;
     QStringList m_triedFallbackKeys;
     bool m_contextCompacting = false;
+    bool m_skipNextAutoCompaction = false;
+    TokenUsage m_pendingUsage;
 
     void handleRealChatMessage(const QString &prompt, const QStringList &attachments = QStringList());
     void showFallbackNotification(const QString &oldModel, const QString &newModel);
     void hideFallbackNotification();
     void syncProviderConfig();
+    void syncChatSessionHistory();
     void updateModelBadges();
     void updateContextMeterForCurrentChat();
     void compactCurrentChat(const QString &userPendingMessage, const QStringList &pendingAttachments = QStringList());

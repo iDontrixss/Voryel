@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voryel Dashboard · Stitch Screens Consolidadas</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        "on-tertiary-container": "#d61917",
+        "on-error": "#ffffff",
+        "error": "#ba1a1a",
+        "on-surface": "#1a1c1c",
+        "surface-container-low": "#f3f3f4",
+        "on-secondary": "#ffffff",
+        "on-background": "#1a1c1c",
+        "primary-container": "#daff00",
+        "tertiary-fixed": "#ffdad5",
+        "surface-container-lowest": "#ffffff",
+        "surface-container": "#eeeeee",
+        "surface-container-high": "#e8e8e8",
+        "tertiary": "#c0000a",
+        "secondary-fixed": "#dde1ff",
+        "primary-fixed": "#cef100",
+        "surface-dim": "#dadada",
+        "secondary-fixed-dim": "#b8c3ff",
+        "error-container": "#ffdad6",
+        "inverse-surface": "#2f3131",
+        "surface-tint": "#556500",
+        "tertiary-fixed-dim": "#ffb4aa",
+        "on-primary": "#ffffff",
+        "primary": "#556500",
+        "inverse-on-surface": "#f0f1f1",
+        "on-primary-fixed": "#181e00",
+        "secondary": "#0040e0",
+        "surface-bright": "#f9f9f9",
+        "tertiary-container": "#ffebe8",
+        "secondary-container": "#2e5bff",
+        "on-primary-container": "#627400",
+        "on-surface-variant": "#454932",
+        "outline-variant": "#c6c9ac",
+        "inverse-primary": "#b5d400",
+        "primary-fixed-dim": "#b5d400",
+        "surface-container-highest": "#e2e2e2",
+        "on-secondary-container": "#efefff",
+        "on-error-container": "#93000a",
+        "surface-variant": "#e2e2e2",
+        "surface": "#f9f9f9",
+        "outline": "#767960",
+        "background": "#f9f9f9",
+        "on-primary-fixed-variant": "#404c00",
+        "on-tertiary": "#ffffff"
+      },
+      fontFamily: {
+        "display": ["Space Grotesk"],
+        "body-md": ["Space Grotesk"],
+        "label-md": ["Space Mono"],
+        "label-sm": ["Space Mono"]
+      },
+      fontSize: {
+        "display": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+        "body-md": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}],
+        "label-md": ["14px", {"lineHeight": "1", "fontWeight": "700"}],
+        "label-sm": ["12px", {"lineHeight": "1", "fontWeight": "400"}]
+      },
+      spacing: {
+        "container-max": "1440px",
+        "stack-lg": "32px",
+        "margin": "32px",
+        "unit": "4px",
+        "stack-md": "16px",
+        "gutter": "24px",
+        "stack-sm": "8px"
+      }
+    }
+  }
+}
+</script>
+<style>
+  .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; vertical-align: middle; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Space Grotesk', sans-serif; background: #f9f9f9; color: #1a1c1c; margin: 0; }
+  .font-label-md, .font-label-sm { font-family: 'Space Mono', monospace; }
+
+  .nb-card {
+    background: #ffffff;
+    border: 4px solid #1a1c1c;
+    box-shadow: 8px 8px 0px 0px #1a1c1c;
+    transition: all 0.15s ease-in-out;
+  }
+  .nb-card:hover { transform: translate(-2px, -2px); box-shadow: 10px 10px 0px 0px #1a1c1c; }
+
+  .nb-button {
+    background: #daff00;
+    border: 4px solid #1a1c1c;
+    box-shadow: 4px 4px 0px 0px #1a1c1c;
+    transition: all 0.1s ease;
+    cursor: pointer;
+    font-family: 'Space Mono', monospace;
+    text-transform: uppercase;
+  }
+  .nb-button:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0px 0px #1a1c1c; }
+  .nb-button:active { transform: translate(4px, 4px); box-shadow: 0px 0px 0px 0px #1a1c1c; }
+
+  .nb-input {
+    border: 4px solid #1a1c1c;
+    background: #ffffff;
+    transition: all 0.2s;
+    font-family: 'Space Mono', monospace;
+    padding: 8px 12px;
+    text-transform: uppercase;
+  }
+  .nb-input:focus { outline: none; box-shadow: 4px 4px 0px 0px #daff00; }
+
+  .sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    text-transform: uppercase;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: #1a1c1c;
+    text-decoration: none;
+  }
+  .sidebar-link:hover { transform: translate(2px, -2px); box-shadow: 4px 4px 0px 0px #1a1c1c; }
+  .sidebar-link.active {
+    background: #daff00;
+    border: 2px solid #1a1c1c;
+    box-shadow: 4px 4px 0px 0px #1a1c1c;
+    transform: translate(-2px, -2px);
+  }
+
+  .screen-section { display: none; }
+  .screen-section.active { display: block; animation: fadeIn 0.3s; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .progress-bar { height: 16px; border: 2px solid #1a1c1c; background: #ffffff; position: relative; }
+  .progress-fill { height: 100%; border-right: 2px solid #1a1c1c; }
+
+  table.nb-table { width: 100%; border-collapse: collapse; }
+  table.nb-table th { background: #1a1c1c; color: #ffffff; padding: 12px; text-align: left; font-family: 'Space Mono', monospace; font-size: 14px; text-transform: uppercase; }
+  table.nb-table td { padding: 12px; border-bottom: 2px solid #1a1c1c; font-size: 14px; }
+  table.nb-table tr:hover { background: #f3f3f4; }
+
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-track { background: #f9f9f9; border-left: 2px solid #1a1c1c; }
+  ::-webkit-scrollbar-thumb { background: #1a1c1c; border: 2px solid #f9f9f9; }
+  ::-webkit-scrollbar-thumb:hover { background: #daff00; border: 2px solid #1a1c1c; }
+
+  .pulse { animation: pulse-anim 2s infinite; }
+  @keyframes pulse-anim { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(26,28,28,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(26,28,28,0.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 2px solid #1a1c1c; font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="fixed left-0 top-0 w-64 h-screen bg-white border-r-4 border-on-surface flex flex-col p-margin overflow-y-auto z-50">
+  <div class="mb-stack-lg flex flex-col gap-1">
+    <h1 class="font-display text-display uppercase tracking-tighter" style="font-size:40px">NEO</h1>
+    <p class="font-label-md text-label-md text-on-surface-variant">V.2.4.0 · STITCH</p>
+  </div>
+  <nav class="flex-grow flex flex-col gap-stack-sm" id="sidebar-nav">
+    <a class="sidebar-link active" data-target="voryel-general"><span class="material-symbols-outlined">dashboard</span>Voryel General</a>
+    <a class="sidebar-link" data-target="ai-orchestrator"><span class="material-symbols-outlined">psychology</span>AI Orchestrator</a>
+    <a class="sidebar-link" data-target="dev-analytics"><span class="material-symbols-outlined">analytics</span>Dev Analytics</a>
+    <a class="sidebar-link" data-target="code-insights"><span class="material-symbols-outlined">terminal</span>Code Insights</a>
+    <a class="sidebar-link" data-target="light-editor"><span class="material-symbols-outlined">code</span>Light Editor</a>
+    <a class="sidebar-link" data-target="devops"><span class="material-symbols-outlined">dns</span>DevOps / CI·CD</a>
+    <a class="sidebar-link" data-target="releases-launcher"><span class="material-symbols-outlined">rocket_launch</span>Releases Launcher</a>
+    <a class="sidebar-link" data-target="reportes"><span class="material-symbols-outlined">bug_report</span>Reportes · Spam</a>
+  </nav>
+  <div class="mt-stack-lg flex flex-col gap-stack-sm pt-stack-lg border-t-2 border-on-surface-variant">
+    <button class="nb-button py-stack-sm px-stack-md text-label-md">NEW_PROJECT</button>
+    <a class="sidebar-link" href="#"><span class="material-symbols-outlined">settings</span>Settings</a>
+    <a class="sidebar-link" href="#"><span class="material-symbols-outlined">help</span>Support</a>
+    <div class="mt-stack-md flex items-center gap-stack-md">
+      <div class="w-10 h-10 border-2 border-on-surface bg-primary-container flex items-center justify-center">
+        <span class="material-symbols-outlined">person</span>
+      </div>
+      <div class="flex flex-col">
+        <p class="font-label-md text-xs leading-none">ADMIN_USER</p>
+        <span class="text-[10px] text-on-surface-variant uppercase">ONLINE</span>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- TOPBAR -->
+<header class="sticky top-0 z-40 flex justify-between items-center px-margin py-stack-md ml-64 bg-surface border-b-4 border-on-surface">
+  <div class="flex items-center gap-stack-lg flex-1">
+    <h2 class="font-display uppercase text-headline-lg whitespace-nowrap tracking-tight" id="page-title">DASHBOARD_CORE</h2>
+    <div class="relative w-full max-w-md">
+      <span class="absolute left-stack-md top-1/2 -translate-y-1/2 material-symbols-outlined text-on-surface-variant">search</span>
+      <input class="nb-input w-full pl-12 pr-stack-md" placeholder="SEARCH_SYSTEM...">
+    </div>
+  </div>
+  <div class="flex items-center gap-stack-md">
+    <button class="p-2 hover:bg-primary-container border-2 border-transparent"><span class="material-symbols-outlined">notifications</span></button>
+    <button class="p-2 hover:bg-primary-container border-2 border-transparent"><span class="material-symbols-outlined">grid_view</span></button>
+    <div class="h-8 w-px bg-on-surface-variant mx-stack-sm"></div>
+    <div class="text-right">
+      <p class="font-label-md text-label-md" id="clock">--:--:--</p>
+      <p class="text-[10px] uppercase font-bold text-primary">System stable</p>
+    </div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main class="ml-64 p-margin min-h-screen grid-bg">
+  <div class="flex flex-col gap-stack-lg">
+
+    <!-- =================================================================== -->
+    <!-- 1. VORYEL GENERAL (screen_0c66) -->
+    <!-- =================================================================== -->
+    <section class="screen-section active" id="voryel-general">
+      <div class="flex justify-between items-end">
+        <div>
+          <p class="font-label-md text-primary uppercase text-sm mb-1 tracking-widest">Global Overview</p>
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">Voryel_System</h1>
+        </div>
+        <button class="nb-button px-stack-md py-stack-sm flex items-center gap-2">
+          <span class="material-symbols-outlined">refresh</span> REFRESH_DATA
+        </button>
+      </div>
+
+      <!-- Stats Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mt-stack-lg">
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start">
+            <span class="font-label-md text-label-md uppercase text-on-surface-variant">Total Reports</span>
+            <span class="material-symbols-outlined text-primary">assessment</span>
+          </div>
+          <div class="font-label-md text-[40px] leading-none py-2">14,208</div>
+          <div class="flex items-center gap-1 text-primary">
+            <span class="material-symbols-outlined text-sm">trending_up</span>
+            <span class="font-label-sm">+12.4% VS LY</span>
+          </div>
+        </div>
+        <div class="nb-card p-stack-md bg-primary-container flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start">
+            <span class="font-label-md text-label-md uppercase text-on-primary-container">Active Bugs</span>
+            <span class="material-symbols-outlined text-on-primary-container">bug_report</span>
+          </div>
+          <div class="font-label-md text-[40px] leading-none py-2">342</div>
+          <div class="flex items-center gap-1 text-on-primary-container">
+            <span class="material-symbols-outlined text-sm">warning</span>
+            <span class="font-label-sm">HIGH PRIORITY</span>
+          </div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start">
+            <span class="font-label-md text-label-md uppercase text-on-surface-variant">Suggestions</span>
+            <span class="material-symbols-outlined text-secondary">lightbulb</span>
+          </div>
+          <div class="font-label-md text-[40px] leading-none py-2">2,891</div>
+          <div class="flex items-center gap-1 text-secondary">
+            <span class="material-symbols-outlined text-sm">pending</span>
+            <span class="font-label-sm">IN REVIEW</span>
+          </div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start">
+            <span class="font-label-md text-label-md uppercase text-on-surface-variant">Spam Filtered</span>
+            <span class="material-symbols-outlined text-tertiary">block</span>
+          </div>
+          <div class="font-label-md text-[40px] leading-none py-2">812</div>
+          <div class="flex items-center gap-1 text-tertiary">
+            <span class="material-symbols-outlined text-sm">shield</span>
+            <span class="font-label-sm">99.2% ACCURACY</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bento Layout -->
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 lg:col-span-8 nb-card">
+          <div class="bg-surface-container-high border-b-4 border-on-surface p-stack-md flex justify-between items-center">
+            <h3 class="font-label-md uppercase">SEVERITY_DISTRIBUTION</h3>
+            <div class="flex gap-2">
+              <span class="flex items-center gap-1"><span class="w-3 h-3 bg-tertiary border border-black"></span><span class="text-[10px] font-label-md">CRITICAL</span></span>
+              <span class="flex items-center gap-1"><span class="w-3 h-3 bg-primary-container border border-black"></span><span class="text-[10px] font-label-md">MAJOR</span></span>
+              <span class="flex items-center gap-1"><span class="w-3 h-3 bg-secondary-container border border-black"></span><span class="text-[10px] font-label-md">MINOR</span></span>
+            </div>
+          </div>
+          <div class="p-stack-lg">
+            <div class="h-64 flex items-end justify-between gap-stack-md px-4 relative">
+              <div class="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20 px-4">
+                <div class="border-t-2 border-dashed border-on-surface w-full"></div>
+                <div class="border-t-2 border-dashed border-on-surface w-full"></div>
+                <div class="border-t-2 border-dashed border-on-surface w-full"></div>
+                <div class="border-t-2 border-dashed border-on-surface w-full"></div>
+                <div class="border-t-2 border-dashed border-on-surface w-full"></div>
+              </div>
+              <div class="flex-1 flex flex-col items-center group relative z-10"><div class="w-full bg-primary-container border-2 border-on-surface group-hover:bg-primary" style="height:60%"></div><span class="font-label-sm mt-stack-sm">MON</span></div>
+              <div class="flex-1 flex flex-col items-center group relative z-10"><div class="w-full bg-secondary-container border-2 border-on-surface" style="height:40%"></div><span class="font-label-sm mt-stack-sm">TUE</span></div>
+              <div class="flex-1 flex flex-col items-center group relative z-10"><div class="w-full bg-tertiary border-2 border-on-surface" style="height:85%"></div><span class="font-label-sm mt-stack-sm">WED</span></div>
+              <div class="flex-1 flex flex-col items-center group relative z-10"><div class="w-full bg-primary-container border-2 border-on-surface" style="height:55%"></div><span class="font-label-sm mt-stack-sm">THU</span></div>
+              <div class="flex-1 flex flex-col items-center group relative z-10"><div class="w-full bg-secondary-container border-2 border-on-surface" style="height:30%"></div><span class="font-label-sm mt-stack-sm">FRI</span></div>
+              <div class="flex-1 flex flex-col items-center group relative z-10"><div class="w-full bg-tertiary border-2 border-on-surface" style="height:70%"></div><span class="font-label-sm mt-stack-sm">SAT</span></div>
+              <div class="flex-1 flex flex-col items-center group relative z-10"><div class="w-full bg-primary-container border-2 border-on-surface" style="height:90%"></div><span class="font-label-sm mt-stack-sm">SUN</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-span-12 lg:col-span-4">
+          <div class="nb-card flex-1 p-stack-md bg-inverse-surface text-inverse-on-surface h-full">
+            <h3 class="font-label-md uppercase mb-stack-md flex items-center justify-between">
+              NODE_STATUS <span class="w-3 h-3 bg-primary-container pulse" style="box-shadow:0 0 10px #daff00"></span>
+            </h3>
+            <div class="flex flex-col justify-center gap-stack-sm">
+              <div class="flex justify-between items-center"><span class="font-label-sm uppercase">CPU_USAGE</span><span class="font-label-md">24.5%</span></div>
+              <div class="progress-bar"><div class="progress-fill bg-primary-container" style="width:24.5%"></div></div>
+              <div class="flex justify-between items-center mt-stack-sm"><span class="font-label-sm uppercase">RAM_BUFFER</span><span class="font-label-md">81.2%</span></div>
+              <div class="progress-bar"><div class="progress-fill bg-tertiary" style="width:81.2%"></div></div>
+            </div>
+            <button class="mt-stack-lg w-full border-2 border-inverse-on-surface py-2 font-label-md hover:bg-inverse-on-surface hover:text-inverse-surface transition-colors">RUN_DIAGNOSTICS</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Latest Reports Table -->
+      <div class="nb-card mt-stack-lg">
+        <div class="bg-on-surface text-white p-stack-md flex justify-between items-center">
+          <h3 class="font-label-md uppercase tracking-widest">LATEST_REPORT_FLUX</h3>
+          <div class="flex gap-stack-md">
+            <button class="text-xs uppercase font-label-md border-b-2 border-primary-container">VIEW ALL</button>
+            <span class="material-symbols-outlined text-primary-container">filter_list</span>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="nb-table">
+            <thead><tr><th>ID_REF</th><th>SUBJECT</th><th>CATEGORY</th><th>STATUS</th><th>PRIORITY</th><th style="text-align:right">TIMESTAMP</th></tr></thead>
+            <tbody>
+              <tr><td class="font-label-md">#RX-9902</td><td><b>Kernel panic during API fetch loop</b></td><td><span class="chip bg-white">BUG</span></td><td><span class="flex items-center gap-2"><span class="w-2 h-2 bg-tertiary"></span>OPEN</span></td><td class="font-label-md text-tertiary">CRITICAL</td><td style="text-align:right" class="font-label-sm">2024-05-24 14:22:11</td></tr>
+              <tr><td class="font-label-md">#RX-9901</td><td><b>Request to add dark mode toggle to Voryel</b></td><td><span class="chip bg-white">SUGGESTION</span></td><td><span class="flex items-center gap-2"><span class="w-2 h-2 bg-secondary"></span>REVIEW</span></td><td class="font-label-md text-on-surface-variant">LOW</td><td style="text-align:right" class="font-label-sm">2024-05-24 13:58:04</td></tr>
+              <tr><td class="font-label-md">#RX-9900</td><td><b>Memory leak in websocket heartbeat</b></td><td><span class="chip bg-white">BUG</span></td><td><span class="flex items-center gap-2"><span class="w-2 h-2 bg-primary"></span>FIXED</span></td><td class="font-label-md text-primary">MAJOR</td><td style="text-align:right" class="font-label-sm">2024-05-24 12:15:33</td></tr>
+              <tr><td class="font-label-md">#RX-9899</td><td><b>Potential spam: User ID 44521</b></td><td><span class="chip bg-white">SPAM</span></td><td><span class="flex items-center gap-2"><span class="w-2 h-2 bg-on-surface-variant"></span>BLOCKED</span></td><td class="font-label-md text-on-surface-variant">MINIMAL</td><td style="text-align:right" class="font-label-sm">2024-05-24 10:44:19</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="p-stack-md bg-surface-container-low flex justify-center">
+          <button class="font-label-md uppercase flex items-center gap-2 hover:underline">LOAD MORE ENTRIES <span class="material-symbols-outlined">expand_more</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 2. AI ORCHESTRATOR (screen_8cfa) -->
+    <!-- =================================================================== -->
+    <section class="screen-section" id="ai-orchestrator">
+      <div class="flex justify-between items-end">
+        <div>
+          <p class="font-label-md text-primary uppercase text-sm mb-1 tracking-widest">AI Conversations</p>
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">VORYEL / AI ORCHESTRATOR</h1>
+        </div>
+        <button class="nb-button px-stack-md py-stack-sm flex items-center gap-2"><span class="material-symbols-outlined">refresh</span> REFRESH_DATA</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mt-stack-lg">
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-surface-variant">Active Provider</span><span class="material-symbols-outlined text-primary">hub</span></div>
+          <div class="font-label-md text-[32px] leading-none py-2">GPT-4o</div>
+          <div class="flex items-center gap-1 text-primary"><span class="material-symbols-outlined text-sm">api</span><span class="font-label-sm">VIA OPENAI API</span></div>
+        </div>
+        <div class="nb-card p-stack-md bg-primary-container flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-primary-container">Current Model</span><span class="material-symbols-outlined text-on-primary-container">psychology</span></div>
+          <div class="font-label-md text-[32px] leading-none py-2">gpt-4o-2024-05-13</div>
+          <div class="flex items-center gap-1 text-on-primary-container"><span class="material-symbols-outlined text-sm">check_circle</span><span class="font-label-sm">OPTIMIZED FOR C++/QT</span></div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-surface-variant">Context Usage</span><span class="material-symbols-outlined text-secondary">data_usage</span></div>
+          <div class="font-label-md text-[32px] leading-none py-2">42.8K / 128K</div>
+          <div class="w-full h-2 bg-surface-container mt-2 border border-on-surface"><div class="bg-secondary h-full" style="width:33%"></div></div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-surface-variant">Project Focus</span><span class="material-symbols-outlined text-tertiary">folder_open</span></div>
+          <div class="font-label-md text-[32px] leading-none py-2">NEO_CORE_V2</div>
+          <div class="flex items-center gap-1 text-tertiary"><span class="material-symbols-outlined text-sm">history</span><span class="font-label-sm">LAST SYNC: 2M AGO</span></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 lg:col-span-8 nb-card">
+          <div class="bg-surface-container-high border-b-4 border-on-surface p-stack-md flex justify-between items-center">
+            <h3 class="font-label-md uppercase">TOKEN_FLOW_ACTIVITY</h3>
+            <div class="flex gap-2">
+              <span class="flex items-center gap-1"><span class="w-3 h-3 bg-tertiary border border-black"></span><span class="text-[10px] font-label-md">INPUT</span></span>
+              <span class="flex items-center gap-1"><span class="w-3 h-3 bg-primary-container border border-black"></span><span class="text-[10px] font-label-md">OUTPUT</span></span>
+              <span class="flex items-center gap-1"><span class="w-3 h-3 bg-secondary-container border border-black"></span><span class="text-[10px] font-label-md">CACHED</span></span>
+            </div>
+          </div>
+          <div class="p-stack-lg">
+            <div class="h-64 flex items-end justify-between gap-stack-md px-4 relative">
+              <div class="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20 px-4">
+                <div class="border-t-2 border-dashed border-on-surface w-full"></div><div class="border-t-2 border-dashed border-on-surface w-full"></div><div class="border-t-2 border-dashed border-on-surface w-full"></div><div class="border-t-2 border-dashed border-on-surface w-full"></div><div class="border-t-2 border-dashed border-on-surface w-full"></div>
+              </div>
+              <div class="flex-1 flex flex-col items-center z-10"><div class="w-full bg-primary-container border-2 border-on-surface" style="height:60%"></div><span class="font-label-sm mt-stack-sm">MON</span></div>
+              <div class="flex-1 flex flex-col items-center z-10"><div class="w-full bg-secondary-container border-2 border-on-surface" style="height:40%"></div><span class="font-label-sm mt-stack-sm">TUE</span></div>
+              <div class="flex-1 flex flex-col items-center z-10"><div class="w-full bg-tertiary border-2 border-on-surface" style="height:85%"></div><span class="font-label-sm mt-stack-sm">WED</span></div>
+              <div class="flex-1 flex flex-col items-center z-10"><div class="w-full bg-primary-container border-2 border-on-surface" style="height:55%"></div><span class="font-label-sm mt-stack-sm">THU</span></div>
+              <div class="flex-1 flex flex-col items-center z-10"><div class="w-full bg-secondary-container border-2 border-on-surface" style="height:30%"></div><span class="font-label-sm mt-stack-sm">FRI</span></div>
+              <div class="flex-1 flex flex-col items-center z-10"><div class="w-full bg-tertiary border-2 border-on-surface" style="height:70%"></div><span class="font-label-sm mt-stack-sm">SAT</span></div>
+              <div class="flex-1 flex flex-col items-center z-10"><div class="w-full bg-primary-container border-2 border-on-surface" style="height:90%"></div><span class="font-label-sm mt-stack-sm">SUN</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-span-12 lg:col-span-4">
+          <div class="nb-card p-stack-md bg-inverse-surface text-inverse-on-surface h-full">
+            <h3 class="font-label-md uppercase mb-stack-md">RECENT CONVERSATIONS</h3>
+            <div class="flex flex-col justify-center gap-stack-sm">
+              <div class="flex justify-between items-center"><span class="font-label-sm uppercase">CPU_USAGE</span><span class="font-label-md">24.5%</span></div>
+              <div class="progress-bar" style="border-color:#f0f1f1"><div class="progress-fill bg-primary-container" style="width:24.5%"></div></div>
+              <div class="flex justify-between items-center mt-stack-sm"><span class="font-label-sm uppercase">RAM_BUFFER</span><span class="font-label-md">81.2%</span></div>
+              <div class="progress-bar" style="border-color:#f0f1f1"><div class="progress-fill bg-tertiary" style="width:81.2%"></div></div>
+            </div>
+            <button class="mt-stack-lg w-full border-2 py-2 font-label-md hover:bg-inverse-on-surface hover:text-inverse-surface transition-colors" style="border-color:#f0f1f1">RUN_DIAGNOSTICS</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="nb-card mt-stack-lg">
+        <div class="bg-on-surface text-white p-stack-md flex justify-between items-center">
+          <h3 class="font-label-md uppercase tracking-widest">LATEST_CHATS</h3>
+          <span class="material-symbols-outlined text-primary-container">filter_list</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="nb-table">
+            <thead><tr><th>Project</th><th>Last Message Preview</th><th>Tokens Used</th><th>Model</th><th style="text-align:right">Timestamp</th></tr></thead>
+            <tbody>
+              <tr><td class="font-label-md">NEO_CORE</td><td><b>Refactor Qt signal-slot connections in...</b></td><td class="font-label-sm">1,240</td><td class="font-label-sm">GPT-4o</td><td style="text-align:right" class="font-label-sm">14:22:11</td></tr>
+              <tr><td class="font-label-md">VORYEL_UI</td><td><b>Implement neobrutalist button component...</b></td><td class="font-label-sm">850</td><td class="font-label-sm">GPT-4o</td><td style="text-align:right" class="font-label-sm">13:58:04</td></tr>
+              <tr><td class="font-label-md">LORYQ_COMPILER</td><td><b>Optimize C++ template instantiation for...</b></td><td class="font-label-sm">2,100</td><td class="font-label-sm">GPT-4o</td><td style="text-align:right" class="font-label-sm">12:15:33</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 3. DEV ANALYTICS (screen_a2de) -->
+    <!-- =================================================================== -->
+    <section class="screen-section" id="dev-analytics">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-stack-md">
+        <div>
+          <div class="flex items-center gap-stack-md mb-2">
+            <p class="font-label-md text-primary uppercase text-sm tracking-widest border-r-2 border-on-surface-variant pr-4">Global Health</p>
+            <div class="flex gap-4 font-label-sm text-[10px] uppercase text-on-surface-variant">
+              <span>Uptime: <span class="text-on-surface font-bold">99.9%</span></span>
+              <span>API: <span class="text-on-surface font-bold">v1.loryq.io</span></span>
+              <span class="flex items-center gap-1">Node: <span class="w-2 h-2 bg-primary pulse"></span><span class="text-primary font-bold">HEALTHY</span></span>
+            </div>
+          </div>
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">VORYEL / AI ORCHESTRATOR</h1>
+        </div>
+        <button class="nb-button px-stack-md py-stack-sm flex items-center gap-2"><span class="material-symbols-outlined">restart_alt</span> REBOOT_NODE</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mt-stack-lg">
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-surface-variant">API Latency</span><span class="material-symbols-outlined text-primary">speed</span></div>
+          <div class="font-label-md text-[32px] leading-none py-2">42MS</div>
+          <div class="h-10 flex items-end gap-0.5">
+            <div class="flex-1 bg-primary opacity-20" style="height:30%"></div><div class="flex-1 bg-primary opacity-40" style="height:45%"></div><div class="flex-1 bg-primary opacity-30" style="height:25%"></div><div class="flex-1 bg-primary opacity-60" style="height:60%"></div><div class="flex-1 bg-primary" style="height:80%"></div><div class="flex-1 bg-primary opacity-50" style="height:40%"></div><div class="flex-1 bg-primary opacity-80" style="height:70%"></div>
+          </div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-surface-variant">Error Rate</span><span class="material-symbols-outlined text-tertiary">warning</span></div>
+          <div class="font-label-md text-[32px] text-tertiary leading-none py-2">0.04%</div>
+          <div class="bg-tertiary-container text-on-tertiary-container px-2 py-1 border border-tertiary"><span class="font-label-sm uppercase text-[10px] font-bold">THRESHOLD: < 0.50%</span></div>
+        </div>
+        <div class="nb-card p-stack-md bg-primary-container flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-primary-container">Traffic</span><span class="material-symbols-outlined text-on-primary-container">dns</span></div>
+          <div class="font-label-md text-[32px] leading-none py-2">1,240 <span class="text-lg opacity-60">R/M</span></div>
+          <div class="flex items-center gap-1 text-on-primary-container"><span class="material-symbols-outlined text-sm">trending_up</span><span class="font-label-sm">+12% VS LAST HOUR</span></div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col gap-stack-sm">
+          <div class="flex justify-between items-start"><span class="font-label-md uppercase text-on-surface-variant">Provider Uptime</span><span class="material-symbols-outlined text-secondary">cloud_done</span></div>
+          <div class="flex flex-col gap-2 mt-2">
+            <div class="flex justify-between items-center text-[10px] font-label-md uppercase"><span>OpenAI</span><span class="text-primary">OPERATIONAL</span></div>
+            <div class="flex justify-between items-center text-[10px] font-label-md uppercase"><span>Local (Voryel_M1)</span><span class="text-primary">OPERATIONAL</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 lg:col-span-8 nb-card">
+          <div class="bg-surface-container-high border-b-4 border-on-surface p-stack-md flex justify-between items-center">
+            <h3 class="font-label-md uppercase">TOKEN_FLOW_ANALYSIS_V2</h3>
+            <select class="bg-white border-2 border-on-surface text-[10px] font-label-md uppercase px-2 py-0 h-6">
+              <option>LAST 24 HOURS</option><option>LAST 7 DAYS</option>
+            </select>
+          </div>
+          <div class="p-stack-lg">
+            <div class="h-64 flex relative">
+              <div class="flex flex-col justify-between items-end pr-4 text-[10px] font-label-md text-on-surface-variant w-12 border-r-2 border-on-surface">
+                <span>1M</span><span>500K</span><span>100K</span><span>0</span>
+              </div>
+              <div class="flex-grow relative px-4">
+                <div class="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-10">
+                  <div class="border-t border-on-surface w-full"></div><div class="border-t border-on-surface w-full"></div><div class="border-t border-on-surface w-full"></div><div class="border-t border-on-surface w-full"></div>
+                </div>
+                <div class="h-full flex items-end justify-between gap-2 pt-4">
+                  <div class="w-full bg-primary border-2 border-on-surface" style="height:80%"></div>
+                  <div class="w-full bg-primary border-2 border-on-surface" style="height:65%"></div>
+                  <div class="w-full bg-secondary border-2 border-on-surface" style="height:90%"></div>
+                  <div class="w-full bg-primary border-2 border-on-surface" style="height:75%"></div>
+                  <div class="w-full bg-primary border-2 border-on-surface" style="height:40%"></div>
+                  <div class="w-full bg-tertiary border-2 border-on-surface" style="height:85%"></div>
+                  <div class="w-full bg-primary border-2 border-on-surface" style="height:60%"></div>
+                </div>
+              </div>
+            </div>
+            <div class="flex ml-16 mt-2 justify-between px-4 text-[10px] font-label-md text-on-surface-variant uppercase">
+              <span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>00:00</span>
+            </div>
+          </div>
+          <div class="border-t-4 border-on-surface bg-inverse-surface p-stack-md h-48 overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center mb-stack-sm border-b border-on-surface-variant/30 pb-2">
+              <h4 class="font-label-md text-primary-fixed uppercase text-xs">LIVE_SYSTEM_LOGS</h4>
+              <span class="font-label-sm text-[10px] text-surface-container">FILTER: ALL_STREAMS</span>
+            </div>
+            <div class="font-label-sm text-[11px] space-y-1 overflow-y-auto pr-2" style="font-family:'Space Mono'">
+              <div class="text-surface-container"><span class="text-primary-fixed">[09:44:01]</span> INF: Connection established to provider_openai_v1</div>
+              <div class="text-surface-container"><span class="text-primary-fixed">[09:44:02]</span> DBG: Cache hit for request_uuid: 88fa-129b</div>
+              <div class="text-tertiary-fixed-dim"><span>[09:44:05]</span> WRN: Latency spike detected on node_cluster_B</div>
+              <div class="text-surface-container"><span class="text-primary-fixed">[09:44:08]</span> INF: Request processing: 200 OK (240ms)</div>
+              <div class="text-surface-container"><span class="text-primary-fixed">[09:44:12]</span> INF: Token quota update: 84% remaining</div>
+              <div class="text-secondary-fixed-dim"><span>[09:44:15]</span> SYS: Garbage collection initiated (Heap: 4.2GB)</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-gutter">
+          <div class="nb-card flex-1 p-stack-md bg-inverse-surface text-inverse-on-surface">
+            <h3 class="font-label-md uppercase mb-stack-md text-primary-container border-b-2 border-on-surface-variant pb-2">API_CONSUMPTION_BY_KEY</h3>
+            <div class="flex flex-col gap-stack-md">
+              <div class="flex flex-col gap-1">
+                <div class="flex justify-between font-label-sm uppercase text-[11px]"><span>KEY: ...8X9F2L</span><span>72.4K REQ</span></div>
+                <div class="h-2 bg-on-surface border" style="border-color:rgba(240,241,241,0.2)"><div class="h-full bg-primary-container" style="width:72%"></div></div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex justify-between font-label-sm uppercase text-[11px]"><span>KEY: ...4M1Q0P</span><span>12.1K REQ</span></div>
+                <div class="h-2 bg-on-surface border" style="border-color:rgba(240,241,241,0.2)"><div class="h-full bg-secondary-container" style="width:12%"></div></div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex justify-between font-label-sm uppercase text-[11px]"><span>KEY: ...0W3Y7T</span><span>9.8K REQ</span></div>
+                <div class="h-2 bg-on-surface border" style="border-color:rgba(240,241,241,0.2)"><div class="h-full bg-tertiary-container" style="width:10%"></div></div>
+              </div>
+            </div>
+            <div class="mt-stack-lg pt-stack-md border-t" style="border-color:rgba(26,28,28,0.3)">
+              <h4 class="font-label-md uppercase text-xs mb-stack-sm">HARDWARE_TELEMETRY</h4>
+              <div class="flex flex-col gap-stack-sm">
+                <div class="flex justify-between items-center"><span class="font-label-sm uppercase text-[10px]">CPU_USAGE</span><span class="font-label-md text-primary-container">24.5%</span></div>
+                <div class="h-3 w-full border-2" style="border-color:#f0f1f1"><div class="h-full bg-primary-container" style="width:24.5%"></div></div>
+                <div class="flex justify-between items-center mt-2"><span class="font-label-sm uppercase text-[10px]">RAM_BUFFER</span><span class="font-label-md text-tertiary">81.2%</span></div>
+                <div class="h-3 w-full border-2" style="border-color:#f0f1f1"><div class="h-full bg-tertiary" style="width:81.2%"></div></div>
+              </div>
+            </div>
+            <button class="mt-stack-lg w-full border-2 py-2 font-label-md hover:bg-inverse-on-surface hover:text-inverse-surface transition-colors uppercase text-sm" style="border-color:#f0f1f1">FLUSH_CACHE_CLUSTER</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="nb-card mt-stack-lg">
+        <div class="bg-on-surface text-white p-stack-md flex justify-between items-center">
+          <h3 class="font-label-md uppercase tracking-widest text-primary-container">LATEST_SYSTEM_FLUX</h3>
+          <div class="flex gap-stack-md">
+            <button class="text-xs uppercase font-label-md border-b-2 border-primary-container">VIEW ALL INCIDENTS</button>
+            <span class="material-symbols-outlined text-primary-container">filter_list</span>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="nb-table">
+            <thead><tr><th>Status</th><th>Endpoint / Service</th><th>Response</th><th>Trace_ID</th><th style="text-align:right">Latency</th></tr></thead>
+            <tbody>
+              <tr><td><span class="chip bg-primary text-on-primary">200 OK</span></td><td class="font-label-md uppercase">/V1/ORCHESTRATOR/QUERY</td><td>Request processed successfully. 812 tokens output.</td><td class="font-label-sm opacity-60">tr-88fa-129b</td><td style="text-align:right" class="font-label-sm">182MS</td></tr>
+              <tr><td><span class="chip bg-tertiary text-on-tertiary">429 LIMIT</span></td><td class="font-label-md uppercase">/V1/MODELS/LORYQ/GENERATE</td><td class="text-tertiary font-bold">Rate limit exceeded for key ...8X9F2L.</td><td class="font-label-sm opacity-60">tr-91ca-4402</td><td style="text-align:right" class="font-label-sm">12MS</td></tr>
+              <tr><td><span class="chip bg-on-surface-variant text-white">500 ERROR</span></td><td class="font-label-md uppercase">/V1/INTERNAL/HEALTH-CHECK</td><td class="italic">Unhandled exception in worker_node_7: Connection reset by peer.</td><td class="font-label-sm opacity-60">tr-002x-ff81</td><td style="text-align:right" class="font-label-sm">1.4S</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 4. CODE INSIGHTS (screen_5d9a) -->
+    <!-- =================================================================== -->
+    <section class="screen-section" id="code-insights">
+      <div class="flex justify-between items-end">
+        <div>
+          <p class="font-label-md text-primary uppercase text-sm mb-1 tracking-widest">Compiler Telemetry</p>
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">COMPILER_INSIGHTS</h1>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter mt-stack-lg">
+        <div class="nb-card p-stack-md" style="border-left:12px solid #ba1a1a">
+          <h4 class="font-label-sm uppercase opacity-60 mb-1">BUILD_ERRORS_COUNT</h4>
+          <div class="flex items-end justify-between">
+            <span class="font-display text-4xl text-error">03</span>
+            <span class="material-symbols-outlined text-error">error</span>
+          </div>
+        </div>
+        <div class="nb-card p-stack-md" style="border-left:12px solid #0040e0">
+          <h4 class="font-label-sm uppercase opacity-60 mb-1">MEMORY_LEAKS_DETECTION</h4>
+          <div class="flex items-end justify-between">
+            <span class="font-display text-4xl">0.00KB</span>
+            <span class="material-symbols-outlined text-secondary">memory</span>
+          </div>
+        </div>
+        <div class="nb-card p-stack-md" style="border-left:12px solid #556500">
+          <h4 class="font-label-sm uppercase opacity-60 mb-1">CODE_COVERAGE</h4>
+          <div class="flex items-end justify-between">
+            <span class="font-display text-4xl">94.2%</span>
+            <span class="material-symbols-outlined text-primary">analytics</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-gutter">
+          <div class="nb-card overflow-hidden flex flex-col">
+            <div class="bg-on-surface text-surface p-stack-md flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="font-label-md uppercase">CRITICAL_LOG_VIEWER</span>
+                <span class="px-2 py-0.5 bg-error text-[10px] font-bold">LIVE_FEED</span>
+              </div>
+              <span class="font-label-sm opacity-60">CONFIG: /etc/sys_core/main.conf</span>
+            </div>
+            <div class="flex font-mono text-sm bg-on-surface text-surface overflow-hidden" style="height:400px">
+              <div class="w-12 text-right pr-3 py-4 opacity-40 select-none">101<br>102<br>103<br>104<br>105<br>106<br>107<br>108<br>109<br>110</div>
+              <div class="p-stack-md flex-grow overflow-y-auto whitespace-pre leading-relaxed">
+<span class="text-secondary-fixed-dim">[2023-11-24 10:42:01]</span> <span class="text-primary-container">SYSTEM.CORE:</span> Initializing sub-processor... <span class="text-primary-fixed-dim">OK</span>
+<span class="text-secondary-fixed-dim">[2023-11-24 10:42:05]</span> <span class="text-primary-container">NETWORK.STACK:</span> Establishing socket connection <span class="opacity-40">...</span>
+<span class="text-secondary-fixed-dim">[2023-11-24 10:42:08]</span> <span class="text-error font-bold">ERROR:</span> Segment violation at address <span class="text-error underline">0x004F32A</span>
+<span class="text-secondary-fixed-dim">[2023-11-24 10:42:08]</span> <span class="text-primary-container">K_DEBUG:</span> Stack trace dumped to /logs/crash_03.dmp
+<span class="text-secondary-fixed-dim">[2023-11-24 10:42:15]</span> <span class="text-primary-container">SYSTEM.CORE:</span> Recovery protocol <span class="text-primary-fixed-dim">INITIATED</span>
+<span class="text-secondary-fixed-dim">[2023-11-24 10:42:20]</span> <span class="text-primary-container">NETWORK.STACK:</span> Retrying handshake (Attempt 2/5)...
+<span class="opacity-40">_ waiting for input...</span>
+              </div>
+            </div>
+            <div class="bg-surface-container border-t-4 border-on-surface p-stack-md flex justify-between items-center">
+              <div class="flex gap-stack-md">
+                <button class="flex items-center gap-2 font-label-sm border-2 border-on-surface px-3 py-1 hover:bg-secondary-container transition-colors"><span class="material-symbols-outlined text-sm">filter_list</span> FILTER_ERRORS</button>
+                <button class="flex items-center gap-2 font-label-sm border-2 border-on-surface px-3 py-1 hover:bg-secondary-container transition-colors"><span class="material-symbols-outlined text-sm">download</span> EXPORT_DUMP</button>
+              </div>
+              <span class="font-label-sm opacity-60">CPU_IDLE_THREADS: 4/16</span>
+            </div>
+          </div>
+
+          <div class="nb-card bg-on-surface text-surface flex flex-col">
+            <div class="flex justify-between items-center p-3 border-b" style="border-color:#454932">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">terminal</span>
+                <span class="font-label-md uppercase tracking-widest">DEBUG_CONSOLE_v2.4</span>
+              </div>
+              <div class="flex gap-2"><span class="w-3 h-3 bg-error"></span><span class="w-3 h-3 bg-primary-container"></span></div>
+            </div>
+            <div class="p-stack-md font-mono text-xs space-y-2 h-64 overflow-y-auto">
+              <p class="text-primary-container">--- REPOSITORY_STATUS ---</p>
+              <p class="pl-4">On branch <span class="text-secondary-fixed-dim">feature/optimizer-core</span></p>
+              <p class="pl-4">Your branch is up to date with 'origin/feature/optimizer-core'.</p>
+              <p class="pl-4">Changes not staged for commit: <span class="text-tertiary-fixed-dim">(use "git add <file>"...")</span></p>
+              <p class="pl-8 text-error">modified:   src/core/optimizer.cpp</p>
+              <p class="pl-8 text-error">modified:   include/utils/mem_mgr.h</p>
+              <p class="text-primary-container mt-4">--- COMPILER_OUTPUT ---</p>
+              <p class="pl-4">g++ -O3 -fno-rtti src/main.cpp -o build/release/core</p>
+              <p class="pl-4">Optimizing instruction cache... [DONE]</p>
+              <p class="pl-4 text-error font-bold">ld: error: undefined symbol: _ZN4Core8Database12initEv</p>
+              <p class="pulse">_</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-gutter">
+          <div class="nb-card flex-grow flex flex-col">
+            <div class="bg-on-surface text-surface p-stack-md flex items-center justify-between">
+              <h4 class="font-label-md uppercase">REPOSITORY_STRUCTURE</h4>
+              <span class="material-symbols-outlined text-sm">account_tree</span>
+            </div>
+            <div class="p-stack-md font-mono text-sm space-y-2 overflow-y-auto" style="max-height:380px">
+              <div class="flex items-center gap-2 hover:text-primary cursor-pointer"><span class="material-symbols-outlined text-sm">folder</span><span>src/</span></div>
+              <div class="ml-4 border-l-2 border-on-surface pl-2 space-y-2">
+                <div class="flex items-center gap-2 hover:text-primary cursor-pointer"><span class="material-symbols-outlined text-sm">folder</span><span>core/</span></div>
+                <div class="flex items-center gap-2 bg-primary-container text-on-primary-container px-2"><span class="material-symbols-outlined text-sm">description</span><span>optimizer.cpp</span></div>
+                <div class="flex items-center gap-2 hover:text-primary cursor-pointer opacity-40"><span class="material-symbols-outlined text-sm">description</span><span>scheduler.cpp</span></div>
+              </div>
+              <div class="mt-8 pt-4 border-t-2 border-surface-container-highest">
+                <h5 class="font-label-sm uppercase opacity-50 mb-3">DEPENDENCY_TREE</h5>
+                <div class="text-xs space-y-1">
+                  <div class="flex items-center gap-2"><span class="text-primary font-bold">├─</span><span>boost_system v1.82</span></div>
+                  <div class="flex items-center gap-2"><span class="text-primary font-bold">├─</span><span>openssl v3.1.0</span></div>
+                  <div class="flex items-center gap-2 ml-4 opacity-60"><span>└─</span><span>zlib v1.2.13</span></div>
+                  <div class="flex items-center gap-2"><span class="text-primary font-bold">└─</span><span>nlohmann_json v3.11</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="p-stack-md bg-surface-container mt-auto">
+              <button class="w-full py-2 border-4 border-on-surface font-label-md bg-surface hover:bg-primary-container transition-colors uppercase">SYNC_REPOS</button>
+            </div>
+          </div>
+
+          <div class="nb-card bg-surface-container-low flex flex-col">
+            <div class="p-stack-md border-b-4 border-on-surface flex items-center justify-between">
+              <h4 class="font-label-md uppercase flex items-center gap-2"><span class="material-symbols-outlined">difference</span> RECENT_DIFFS</h4>
+              <span class="bg-on-surface text-surface px-2 py-0.5 text-[10px] font-bold">HEAD → MAIN</span>
+            </div>
+            <div class="p-stack-md space-y-6">
+              <div class="space-y-2">
+                <div class="flex justify-between text-xs font-bold uppercase"><span>optimizer.cpp</span><span class="text-primary">+12/-4</span></div>
+                <div class="font-mono text-[10px] bg-on-surface text-surface p-2 overflow-x-auto">
+                  <div class="opacity-40">- void calculate(int x) {</div>
+                  <div class="text-primary">+ void calculate(int x, bool fast) {</div>
+                  <div class="text-primary">+   if (fast) return x << 2;</div>
+                </div>
+              </div>
+              <div class="space-y-2">
+                <div class="flex justify-between text-xs font-bold uppercase"><span>config.json</span><span class="text-tertiary">+1/-1</span></div>
+                <div class="font-mono text-[10px] bg-on-surface text-surface p-2 overflow-x-auto">
+                  <div class="opacity-40">- "debug": false,</div>
+                  <div class="text-primary">+ "debug": true,</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 5. LIGHT EDITOR (screen_547c) -->
+    <!-- =================================================================== -->
+    <section class="screen-section" id="light-editor">
+      <div class="flex justify-between items-end">
+        <div>
+          <p class="font-label-md text-primary uppercase text-sm mb-1 tracking-widest">Snippet Workspace</p>
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">LORYQ CODE / LIGHT_EDITOR</h1>
+        </div>
+      </div>
+
+      <div class="nb-card p-stack-lg mt-stack-lg bg-secondary-container text-on-secondary-container">
+        <div class="flex justify-between items-end">
+          <div>
+            <p class="font-label-md max-w-2xl">A raw, functional terminal for capturing logic, snippets, and architectural thoughts. No fluff, just raw syntax and structure.</p>
+          </div>
+          <div class="font-label-md text-right">
+            <span class="block opacity-70">SYSTEM_STATUS</span>
+            <span class="block text-primary-container font-bold">OPERATIONAL // SNIPPET_SYNC_ON</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-gutter">
+          <div class="nb-card overflow-hidden flex flex-col">
+            <div class="bg-surface-container-highest border-b-4 border-on-surface p-stack-md flex items-center justify-between">
+              <span class="font-label-md uppercase px-2 py-1 bg-on-surface text-surface">NEW_ENTRY.TXT</span>
+              <div class="flex gap-2">
+                <button class="w-8 h-8 flex items-center justify-center border-2 border-on-surface bg-surface hover:bg-primary-container font-bold">B</button>
+                <button class="w-8 h-8 flex items-center justify-center border-2 border-on-surface bg-surface hover:bg-primary-container italic">I</button>
+                <button class="w-8 h-8 flex items-center justify-center border-2 border-on-surface bg-surface hover:bg-primary-container underline">U</button>
+                <div class="w-1 h-8 bg-on-surface mx-1"></div>
+                <button class="px-2 h-8 flex items-center justify-center border-2 border-on-surface bg-surface hover:bg-primary-container font-bold text-sm">H1</button>
+                <button class="px-2 h-8 flex items-center justify-center border-2 border-on-surface bg-surface hover:bg-primary-container font-bold text-xs">H2</button>
+                <button class="w-8 h-8 flex items-center justify-center border-2 border-on-surface bg-surface hover:bg-primary-container"><span class="material-symbols-outlined text-sm">code</span></button>
+              </div>
+            </div>
+            <div class="flex font-mono text-sm bg-on-surface text-surface overflow-hidden" style="height:320px">
+              <div class="w-10 bg-surface-container-highest text-on-surface-variant text-right pr-2 py-4 select-none opacity-40">1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10</div>
+              <div class="p-stack-md flex-grow overflow-y-auto">
+<span class="text-primary-container">#include</span> <iostream><br><br>
+<span class="text-secondary-fixed-dim">int</span> <span class="text-primary-fixed-dim">main</span>() {<br>
+&nbsp;&nbsp;std::cout << <span class="text-tertiary-fixed-dim">"Initializing Loryq Editor..."</span> << std::endl;<br>
+&nbsp;&nbsp;<span class="text-primary-container">return</span> <span class="text-secondary-fixed-dim">0</span>;<br>
+}<br>
+<span class="opacity-40">// Start writing code here...</span>
+              </div>
+            </div>
+            <div class="bg-surface-container border-t-4 border-on-surface p-stack-md flex justify-between items-center">
+              <div class="flex gap-4">
+                <span class="flex items-center gap-1 font-label-sm opacity-60"><span class="material-symbols-outlined text-sm">history</span> LAST_SAVED: 2MIN AGO</span>
+                <span class="flex items-center gap-1 font-label-sm opacity-60"><span class="material-symbols-outlined text-sm">storage</span> 1.2 KB</span>
+              </div>
+              <button class="nb-button px-8 py-2">SAVE_SNIPPET</button>
+            </div>
+          </div>
+
+          <div class="nb-card bg-on-surface text-surface p-stack-md font-mono text-xs">
+            <div class="flex justify-between border-b pb-2 mb-2" style="border-color:#454932">
+              <span class="uppercase opacity-60">Terminal</span>
+              <span class="material-symbols-outlined text-xs">close</span>
+            </div>
+            <div class="space-y-1">
+              <p class="text-primary-container">[system] Loryq Light Editor v2.4.0 initialized.</p>
+              <p>> g++ main.cpp -o loryq_app</p>
+              <p>> ./loryq_app</p>
+              <p>Initializing Loryq Editor...</p>
+              <p class="opacity-40">_</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-gutter">
+            <div class="nb-card p-stack-md flex flex-col gap-stack-md">
+              <div class="flex justify-between items-center"><h4 class="font-label-md uppercase">CPU LOAD</h4><span class="text-primary font-bold">12%</span></div>
+              <div class="h-16 flex items-end gap-1">
+                <div class="w-full bg-primary" style="height:25%"></div><div class="w-full bg-primary" style="height:33%"></div><div class="w-full bg-primary" style="height:50%"></div><div class="w-full bg-primary" style="height:25%"></div><div class="w-full bg-primary" style="height:16%"></div>
+              </div>
+            </div>
+            <div class="nb-card p-stack-md bg-on-surface text-surface flex flex-col justify-center items-start gap-2">
+              <div class="w-full flex justify-between items-center"><h4 class="font-label-md uppercase">MEMORY</h4><span class="text-primary-container font-bold">64MB</span></div>
+              <div class="w-full bg-surface-container-highest h-4 border-2" style="border-color:#1a1c1c"><div class="bg-primary-container h-full" style="width:25%"></div></div>
+              <p class="font-label-sm opacity-60">LIGHTWEIGHT_MODE_ACTIVE</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-gutter">
+          <div class="nb-card flex-grow overflow-hidden flex flex-col">
+            <div class="bg-on-surface text-surface p-stack-md flex items-center justify-between">
+              <h4 class="font-label-md uppercase">PROJECT EXPLORER</h4>
+              <span class="material-symbols-outlined text-sm">create_new_folder</span>
+            </div>
+            <div class="p-stack-md space-y-4 font-mono text-sm">
+              <div class="flex items-center gap-2 hover:text-primary cursor-pointer"><span class="material-symbols-outlined text-sm">folder_open</span><span>src/</span></div>
+              <div class="ml-4 space-y-2">
+                <div class="flex items-center gap-2 hover:text-primary cursor-pointer bg-primary-container text-on-primary-container px-2"><span class="material-symbols-outlined text-sm">description</span><span>main.cpp</span></div>
+                <div class="flex items-center gap-2 hover:text-primary cursor-pointer"><span class="material-symbols-outlined text-sm">description</span><span>utils.h</span></div>
+              </div>
+              <div class="flex items-center gap-2 hover:text-primary cursor-pointer"><span class="material-symbols-outlined text-sm">settings</span><span>config.json</span></div>
+              <div class="flex items-center gap-2 hover:text-primary cursor-pointer opacity-40"><span class="material-symbols-outlined text-sm">description</span><span>README.md</span></div>
+            </div>
+            <div class="p-stack-md bg-surface-container mt-auto">
+              <button class="w-full py-2 border-4 border-dashed border-on-surface font-label-md hover:bg-surface transition-colors uppercase">ADD_FILE</button>
+            </div>
+          </div>
+
+          <div class="nb-card p-stack-md">
+            <h4 class="font-label-md uppercase mb-4 border-b-2 border-on-surface pb-2 flex items-center gap-2"><span class="material-symbols-outlined">update</span> RECENT_DIFFS</h4>
+            <ul class="space-y-3">
+              <li class="flex gap-3 text-xs font-label-sm"><span class="w-1.5 h-1.5 bg-primary mt-1 flex-shrink-0"></span><div><p class="font-bold">Modified Loryq_Core</p><p class="opacity-60">Added 4 new code blocks.</p></div></li>
+              <li class="flex gap-3 text-xs font-label-sm"><span class="w-1.5 h-1.5 bg-tertiary mt-1 flex-shrink-0"></span><div><p class="font-bold">Deleted Legacy_Logic</p><p class="opacity-60">Cleared 12KB of outdated notes.</p></div></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 6. DEVOPS / CI·CD (screen_cfe4) -->
+    <!-- =================================================================== -->
+    <section class="screen-section" id="devops">
+      <div class="flex justify-between items-end">
+        <div>
+          <p class="font-label-md text-primary uppercase text-sm mb-1 tracking-widest">Pipeline Status</p>
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">NEO_OPS / DEVOPS</h1>
+        </div>
+        <div class="flex items-center gap-stack-md">
+          <button class="nb-button px-4 py-2 font-label-md bg-error text-white flex items-center gap-2"><span class="material-symbols-outlined">stop_circle</span> FORCE_STOP_REDEPLOY</button>
+          <button class="p-2 hover:bg-primary-container border-2 border-transparent"><span class="material-symbols-outlined">notifications_active</span></button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-gutter mt-stack-lg">
+        <div class="nb-card p-stack-lg bg-surface flex flex-col">
+          <h3 class="font-label-md uppercase mb-2">BUILD_SUCCESS_RATE</h3>
+          <div class="flex items-baseline gap-2">
+            <span class="font-display leading-none" style="font-size:48px">98.4%</span>
+            <span class="font-label-sm uppercase text-primary font-bold">▲ 0.2%</span>
+          </div>
+        </div>
+        <div class="nb-card p-stack-lg bg-surface flex flex-col">
+          <h3 class="font-label-md uppercase mb-2">AVG_DEPLOY_TIME</h3>
+          <div class="flex items-baseline gap-2">
+            <span class="font-display leading-none" style="font-size:48px">2M 42S</span>
+            <span class="font-label-sm uppercase text-error font-bold">▼ 12S</span>
+          </div>
+        </div>
+        <div class="nb-card p-stack-lg bg-primary-container flex flex-col">
+          <h3 class="font-label-md uppercase mb-2">ACTIVE_RELEASES</h3>
+          <div class="flex justify-between items-end">
+            <div class="flex flex-col gap-1">
+              <span class="font-label-md">STABLE: 12</span>
+              <span class="font-label-md">BETA: 4</span>
+              <span class="font-label-md">DEV: 7</span>
+            </div>
+            <span class="font-display leading-none" style="font-size:48px">23</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 lg:col-span-8">
+          <div class="nb-card h-full">
+            <div class="border-b-4 border-on-surface px-stack-lg py-stack-sm bg-surface-container-highest flex justify-between items-center">
+              <h2 class="font-display text-headline-md uppercase">DEPLOYMENT_LOG</h2>
+              <span class="border-2 border-on-surface px-2 py-1 font-label-sm bg-white uppercase">BRANCH: ALL</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="nb-table">
+                <thead><tr><th>COMMIT_HASH</th><th>BRANCH</th><th>STATUS</th><th style="text-align:right">TIMESTAMP</th></tr></thead>
+                <tbody class="font-label-md">
+                  <tr><td><span class="bg-surface-container px-2 py-1 border border-on-surface">#a1b2c3d</span></td><td class="uppercase">main</td><td><span class="chip bg-primary-container"><span class="w-2 h-2 bg-primary pulse"></span>SUCCESS</span></td><td style="text-align:right" class="uppercase">2024-05-20 14:20:01</td></tr>
+                  <tr><td><span class="bg-surface-container px-2 py-1 border border-on-surface">#f4e3d2c</span></td><td class="uppercase">staging</td><td><span class="chip bg-error-container"><span class="w-2 h-2 bg-error pulse"></span>FAILED</span></td><td style="text-align:right" class="uppercase">2024-05-20 13:45:12</td></tr>
+                  <tr><td><span class="bg-surface-container px-2 py-1 border border-on-surface">#9x8y7z6</span></td><td class="uppercase">feature/ui-brutalist</td><td><span class="chip bg-secondary-fixed text-on-secondary-fixed"><span class="w-2 h-2 bg-secondary pulse"></span>BUILDING...</span></td><td style="text-align:right" class="uppercase">IN_PROGRESS</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-gutter">
+          <div class="nb-card p-stack-lg">
+            <div class="border-b-4 border-on-surface -mx-stack-lg -mt-stack-lg px-stack-lg py-stack-sm mb-stack-md bg-surface-container-high">
+              <h2 class="font-display text-headline-md uppercase">NETWORK_TRAFFIC</h2>
+            </div>
+            <div class="flex flex-col gap-stack-md">
+              <div class="flex flex-col gap-1">
+                <div class="flex justify-between font-label-md uppercase"><span>NETWORK_THROUGHPUT</span><span>482.5 MB/s</span></div>
+                <div class="w-full h-8 border-4 border-on-surface bg-surface-container-low overflow-hidden"><div class="bg-secondary h-full border-r-4 border-on-surface" style="width:72%"></div></div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex justify-between font-label-md uppercase"><span>SERVER_LOAD</span><span>34%</span></div>
+                <div class="w-full h-8 border-4 border-on-surface bg-surface-container-low overflow-hidden"><div class="bg-primary-container h-full border-r-4 border-on-surface" style="width:34%"></div></div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex justify-between font-label-md uppercase"><span>RAM_ALLOCATION</span><span>12.4 GB / 32 GB</span></div>
+                <div class="w-full h-8 border-4 border-on-surface bg-surface-container-low overflow-hidden"><div class="bg-primary-container h-full border-r-4 border-on-surface" style="width:38%"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="nb-card p-stack-lg bg-inverse-surface text-inverse-on-surface">
+            <div class="flex items-center gap-2 mb-4">
+              <span class="material-symbols-outlined text-primary-container">terminal</span>
+              <h3 class="font-label-md uppercase">CI/CD_EVENT_FEED</h3>
+            </div>
+            <div class="font-label-sm space-y-2 opacity-80 uppercase font-mono">
+              <p class="border-l-2 border-primary-container pl-2">> [INFO] MIGRATION_COMPLETE v.1.2.4</p>
+              <p class="border-l-2 border-error pl-2">> [WARN] LATENCY_SPIKE IN_US_EAST_1</p>
+              <p class="border-l-2 border-primary-container pl-2">> [INFO] CACHE_PURGED_GLOBAL</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 7. RELEASES LAUNCHER (screen_baf7) -->
+    <!-- =================================================================== -->
+    <section class="screen-section" id="releases-launcher">
+      <div class="flex justify-between items-end">
+        <div>
+          <p class="font-label-md text-primary uppercase text-sm mb-1 tracking-widest">Instance Manager</p>
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">LORYQ LAUNCHER / MC_CORE</h1>
+        </div>
+        <div class="relative">
+          <span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface">search</span>
+          <input class="nb-input pl-12 py-2 w-96" placeholder="SEARCH RELEASES...">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 lg:col-span-5 flex flex-col gap-gutter">
+          <div class="nb-card p-stack-lg">
+            <div class="border-b-4 border-on-surface -mx-stack-lg -mt-stack-lg px-stack-lg py-stack-sm mb-stack-md bg-primary-container">
+              <h2 class="font-display text-headline-md uppercase">CREATE NEW INSTANCE</h2>
+            </div>
+            <form class="flex flex-col gap-stack-md" onsubmit="event.preventDefault();">
+              <div class="flex flex-col gap-1">
+                <label class="font-label-md uppercase">MINECRAFT VERSION</label>
+                <select class="nb-input w-full uppercase"><option>1.20.1</option><option>1.19.4</option><option>1.18.2</option><option>1.12.2</option></select>
+              </div>
+              <div class="flex flex-col gap-1">
+                <label class="font-label-md uppercase">MODLOADER TYPE</label>
+                <div class="grid grid-cols-3 gap-1">
+                  <label class="flex items-center justify-center border-4 border-on-surface p-stack-sm cursor-pointer bg-primary-container"><span class="font-label-md uppercase">VANILLA</span></label>
+                  <label class="flex items-center justify-center border-4 border-on-surface p-stack-sm cursor-pointer hover:bg-primary-container transition-colors"><span class="font-label-md uppercase">FORGE</span></label>
+                  <label class="flex items-center justify-center border-4 border-on-surface p-stack-sm cursor-pointer hover:bg-primary-container transition-colors"><span class="font-label-md uppercase">FABRIC</span></label>
+                </div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <label class="font-label-md uppercase">INSTANCE NAME</label>
+                <input class="nb-input w-full uppercase" placeholder="E.G. SURVIVAL_MODPDED">
+              </div>
+              <button class="nb-button py-stack-md flex justify-center items-center gap-2" type="submit"><span class="material-symbols-outlined">add_box</span>CREATE INSTANCE</button>
+            </form>
+          </div>
+
+          <div class="nb-card p-stack-lg bg-secondary-container text-on-secondary-container">
+            <div class="flex items-start gap-stack-md">
+              <span class="material-symbols-outlined text-4xl" style="font-variation-settings: 'FILL' 1;">rocket</span>
+              <div>
+                <h3 class="font-display uppercase mb-2">SYSTEM STATUS</h3>
+                <p class="opacity-90">Auto-deployment pipelines are ACTIVE. Pre-releases are automatically tagged with [BETA] in the global distribution network.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-span-12 lg:col-span-7">
+          <div class="nb-card h-full">
+            <div class="border-b-4 border-on-surface px-stack-lg py-stack-sm bg-surface-container-highest flex justify-between items-center">
+              <h2 class="font-display text-headline-md uppercase">INSTALLED INSTANCES</h2>
+              <div class="flex gap-1">
+                <span class="border-2 border-on-surface px-2 py-1 font-label-sm bg-white">STABLE: 12</span>
+                <span class="border-2 border-on-surface px-2 py-1 font-label-sm bg-primary-container">BETA: 4</span>
+              </div>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="nb-table">
+                <thead><tr><th>INSTANCE</th><th>MODLOADER</th><th>LAST PLAYED</th><th style="text-align:right">ACTIONS</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td><div class="flex items-center gap-2"><span class="font-display text-headline-md">1.20.1_SMP</span><span class="chip bg-primary-container" style="font-size:9px">ACTIVE</span></div></td>
+                    <td><span class="chip bg-white">FABRIC</span></td>
+                    <td class="font-label-sm uppercase">TODAY, 14:20</td>
+                    <td style="text-align:right"><div class="flex justify-end gap-2"><button class="px-3 py-1 bg-primary-container border-2 border-on-surface font-label-md hover:translate-x-1 transition-all">PLAY</button><button class="p-1 border-2 border-on-surface hover:bg-surface-container"><span class="material-symbols-outlined text-sm">settings</span></button><button class="p-1 border-2 border-on-surface hover:bg-error-container"><span class="material-symbols-outlined text-sm">delete</span></button></div></td>
+                  </tr>
+                  <tr>
+                    <td><div class="flex items-center gap-2"><span class="font-display text-headline-md">RLCRAFT_V2</span></div></td>
+                    <td><span class="chip bg-secondary-fixed uppercase">FORGE</span></td>
+                    <td class="font-label-sm uppercase">OCT 20, 2023</td>
+                    <td style="text-align:right"><div class="flex justify-end gap-2"><button class="px-3 py-1 bg-primary-container border-2 border-on-surface font-label-md hover:translate-x-1 transition-all">PLAY</button><button class="p-1 border-2 border-on-surface hover:bg-surface-container"><span class="material-symbols-outlined text-sm">settings</span></button><button class="p-1 border-2 border-on-surface hover:bg-error-container"><span class="material-symbols-outlined text-sm">delete</span></button></div></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="p-stack-md bg-surface-container flex justify-center">
+              <button class="font-label-md uppercase border-b-4 border-on-surface hover:text-primary transition-colors">LOAD ARCHIVED RELEASES</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-gutter mt-stack-lg">
+        <div class="col-span-12 md:col-span-4 nb-card p-stack-lg flex flex-col">
+          <h3 class="font-label-md uppercase mb-4 border-b-2 border-on-surface pb-2">ACTIVE BUILDS</h3>
+          <div class="flex items-end gap-2">
+            <span class="font-display leading-none" style="font-size:48px">842</span>
+            <span class="font-label-sm uppercase text-primary font-bold pb-2">+12% VS LY</span>
+          </div>
+          <div class="mt-auto pt-stack-md">
+            <div class="w-full bg-surface-container h-4 border-2 border-on-surface"><div class="bg-primary-container h-full border-r-2 border-on-surface" style="width:65%"></div></div>
+          </div>
+        </div>
+        <div class="col-span-12 md:col-span-8 nb-card overflow-hidden">
+          <div class="p-stack-lg">
+            <div class="flex justify-between items-start mb-4">
+              <h3 class="font-label-md uppercase">RESOURCE ALLOCATION (RAM)</h3>
+              <span class="material-symbols-outlined">memory</span>
+            </div>
+            <div class="h-32 flex flex-col justify-center gap-4">
+              <div class="flex justify-between font-display uppercase"><span>8.0 GB ALLOCATED</span><span class="opacity-60">16.0 GB TOTAL</span></div>
+              <div class="w-full bg-surface-container h-8 border-4 border-on-surface relative">
+                <div class="bg-primary-container h-full border-r-4 border-on-surface" style="width:50%"></div>
+                <span class="absolute inset-0 flex items-center justify-center font-label-md">50% UTILIZATION</span>
+              </div>
+            </div>
+            <div class="mt-4 flex gap-stack-md">
+              <div class="flex items-center gap-2"><div class="w-3 h-3 bg-primary-container border border-on-surface"></div><span class="font-label-sm uppercase">MINECRAFT PROCESS</span></div>
+              <div class="flex items-center gap-2"><div class="w-3 h-3 bg-surface-container border border-on-surface"></div><span class="font-label-sm uppercase">SYSTEM RESERVE</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 8. REPORTES (screen_dac1) -->
+    <!-- =================================================================== -->
+    <section class="screen-section" id="reportes">
+      <div class="flex justify-between items-end">
+        <div class="flex items-center gap-4">
+          <h1 class="font-display uppercase leading-none" style="font-size:48px">ZOTLIN / REPORTES</h1>
+          <div class="bg-on-surface text-surface px-2 py-1 font-label-md">DASHBOARD_CORE</div>
+        </div>
+        <div class="flex items-center gap-stack-md">
+          <div class="relative">
+            <input class="nb-input w-64" placeholder="BUSCAR ISSUES...">
+            <span class="material-symbols-outlined absolute right-3 top-2.5">search</span>
+          </div>
+          <button class="p-2 hover:bg-surface-container border-2 border-on-surface"><span class="material-symbols-outlined">notifications</span></button>
+          <div class="w-10 h-10 border-2 border-on-surface bg-surface-container-high flex items-center justify-center"><span class="material-symbols-outlined">person</span></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-gutter mt-stack-lg">
+        <div class="nb-card p-stack-md flex flex-col justify-between">
+          <p class="font-label-md uppercase opacity-70">Total Reportes</p>
+          <h3 class="font-display mt-2" style="font-size:48px">128</h3>
+          <div class="h-1 bg-on-surface mt-4 w-1/2"></div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col justify-between">
+          <p class="font-label-md uppercase opacity-70">Bugs</p>
+          <h3 class="font-display mt-2 text-tertiary" style="font-size:48px">42</h3>
+          <div class="h-1 bg-tertiary mt-4 w-1/4"></div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col justify-between">
+          <p class="font-label-md uppercase opacity-70">Sugerencias</p>
+          <h3 class="font-display mt-2 text-secondary" style="font-size:48px">76</h3>
+          <div class="h-1 bg-secondary mt-4 w-1/3"></div>
+        </div>
+        <div class="nb-card p-stack-md flex flex-col justify-between bg-surface-container-lowest">
+          <p class="font-label-md uppercase opacity-70">Spam</p>
+          <h3 class="font-display mt-2 opacity-50" style="font-size:48px">10</h3>
+          <div class="h-1 bg-on-surface opacity-20 mt-4 w-1/6"></div>
+        </div>
+      </div>
+
+      <div class="flex flex-col lg:flex-row gap-gutter mt-stack-lg">
+        <div class="lg:w-2/3 flex flex-col gap-stack-lg">
+          <div class="nb-card p-stack-sm flex flex-wrap items-center gap-stack-md bg-surface-container-low">
+            <button class="nb-button bg-primary-container px-4 py-2 text-sm">TODOS</button>
+            <button class="nb-button bg-white px-4 py-2 text-sm">BUGS</button>
+            <button class="nb-button bg-white px-4 py-2 text-sm">SUGERENCIAS</button>
+            <div class="h-8 w-1 bg-on-surface mx-2 hidden md:block"></div>
+            <button class="flex items-center gap-2 font-label-md px-2 border-b-4 border-error">🔴 ALTA</button>
+            <button class="flex items-center gap-2 font-label-md px-2 border-b-4 border-primary-container">🟡 MEDIA</button>
+            <button class="flex items-center gap-2 font-label-md px-2 border-b-4 border-primary">🟢 BAJA</button>
+            <button class="ml-auto p-2 border-2 border-on-surface hover:bg-on-surface hover:text-surface transition-colors flex items-center gap-1"><span class="material-symbols-outlined text-sm">refresh</span><span class="font-label-md">ACTUALIZAR</span></button>
+          </div>
+
+          <div class="flex flex-col gap-stack-md">
+            <div class="nb-card overflow-hidden">
+              <div class="bg-surface-container-high p-stack-sm px-stack-md flex justify-between items-center border-b-4 border-on-surface">
+                <div class="flex items-center gap-2"><span class="material-symbols-outlined text-tertiary">bug_report</span><span class="font-label-md uppercase">BUG #402</span></div>
+                <span class="bg-error text-white px-2 py-0.5 font-label-sm">ALTA GRAVEDAD</span>
+              </div>
+              <div class="p-stack-md">
+                <h4 class="font-display mb-2" style="font-size:22px">Error de desbordamiento en el renderizado del Launcher</h4>
+                <p class="text-on-surface-variant mb-stack-md">El motor de visualización no calcula correctamente el padding en resoluciones 4K, causando que los botones se salgan del viewport...</p>
+                <div class="flex flex-wrap gap-stack-md items-center">
+                  <div class="flex items-center gap-2"><div class="w-6 h-6 bg-secondary-container border-2 border-on-surface"></div><span class="font-label-sm">Asignado: @alberto_dev</span></div>
+                  <div class="flex gap-2 ml-auto">
+                    <button class="nb-button bg-white px-4 py-2 flex items-center gap-2">VER EN GITHUB <span class="material-symbols-outlined text-sm">open_in_new</span></button>
+                    <button class="nb-button px-4 py-2 flex items-center gap-2">RESOLVER <span class="material-symbols-outlined text-sm">check_circle</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="nb-card overflow-hidden">
+              <div class="bg-surface-container-high p-stack-sm px-stack-md flex justify-between items-center border-b-4 border-on-surface">
+                <div class="flex items-center gap-2"><span class="material-symbols-outlined text-secondary">lightbulb</span><span class="font-label-md uppercase">SUGERENCIA #405</span></div>
+                <span class="bg-primary text-white px-2 py-0.5 font-label-sm">BAJA PRIORIDAD</span>
+              </div>
+              <div class="p-stack-md">
+                <h4 class="font-display mb-2" style="font-size:22px">Implementar modo oscuro nativo en Loryq Code</h4>
+                <p class="text-on-surface-variant mb-stack-md">Varios usuarios han solicitado una interfaz más amigable para sesiones de trabajo nocturnas prolongadas...</p>
+                <div class="flex flex-wrap gap-stack-md items-center">
+                  <div class="flex items-center gap-2"><div class="w-6 h-6 bg-surface-container-highest border-2 border-on-surface"></div><span class="font-label-sm">Sin asignar</span></div>
+                  <div class="flex gap-2 ml-auto">
+                    <button class="nb-button bg-white px-4 py-2 flex items-center gap-2">DISCUTIR <span class="material-symbols-outlined text-sm">chat</span></button>
+                    <button class="nb-button px-4 py-2 flex items-center gap-2">APROBAR <span class="material-symbols-outlined text-sm">thumb_up</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="nb-card p-margin text-center border-dashed border-4">
+              <div class="inline-block material-symbols-outlined mb-2 pulse" style="font-size:48px">sync</div>
+              <p class="font-label-md uppercase">Cargando más issues desde GitHub...</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="lg:w-1/3 flex flex-col gap-stack-lg">
+          <div class="nb-card">
+            <div class="bg-on-surface text-surface p-stack-sm px-stack-md flex justify-between items-center">
+              <h3 class="font-label-md uppercase tracking-widest flex items-center gap-2"><span class="material-symbols-outlined">security</span> SPAM (IA)</h3>
+              <span class="bg-tertiary-container text-on-tertiary-container px-2 py-0.5 font-label-sm">10 FILTRADOS</span>
+            </div>
+            <div class="p-stack-md flex flex-col gap-stack-sm">
+              <p class="text-sm italic opacity-70 mb-2">Mensajes detectados automáticamente como ruido por ZotlinGuard.</p>
+              <div class="border-2 border-on-surface p-stack-sm bg-surface-container-low relative">
+                <div class="flex justify-between font-label-sm mb-1"><span>@user_x92</span><span>hace 5m</span></div>
+                <p class="text-xs">"Gana dinero rápido con este enlace increíble..."</p>
+                <button class="absolute -right-2 -top-2 bg-error text-white w-6 h-6 border-2 border-on-surface flex items-center justify-center hover:scale-110 transition-transform"><span class="material-symbols-outlined" style="font-size:12px">close</span></button>
+              </div>
+              <div class="border-2 border-on-surface p-stack-sm bg-surface-container-low relative opacity-60">
+                <div class="flex justify-between font-label-sm mb-1"><span>@bot_killer</span><span>hace 1h</span></div>
+                <p class="text-xs">"FREE GIVEAWAY CLICK HERE NOW!"</p>
+                <button class="absolute -right-2 -top-2 bg-error text-white w-6 h-6 border-2 border-on-surface flex items-center justify-center"><span class="material-symbols-outlined" style="font-size:12px">close</span></button>
+              </div>
+              <button class="nb-button bg-white mt-stack-md w-full py-2 text-sm">LIMPIAR TODO EL SPAM</button>
+            </div>
+          </div>
+
+          <div class="nb-card overflow-hidden">
+            <div class="bg-primary-container p-stack-sm px-stack-md border-b-4 border-on-surface">
+              <h3 class="font-label-md uppercase flex items-center gap-2"><span class="material-symbols-outlined">update</span> ÚLTIMA RELEASE</h3>
+            </div>
+            <div class="p-stack-md">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="font-display" style="font-size:22px">V2.4.0</span>
+                <span class="bg-on-surface text-surface px-2 py-0.5 text-xs font-label-md uppercase">ESTABLE</span>
+              </div>
+              <ul class="text-sm flex flex-col gap-1 list-disc list-inside mb-stack-md">
+                <li>Optimización del tiempo de arranque</li>
+                <li>Arreglado crash en el módulo de red</li>
+                <li>Nuevos iconos neobrutalistas</li>
+              </ul>
+              <button class="nb-button bg-on-surface text-surface w-full py-3 flex items-center justify-center gap-2">+ NUEVA RELEASE</button>
+            </div>
+          </div>
+
+          <div class="nb-card bg-surface-container-high flex flex-col">
+            <div class="p-stack-sm border-b-4 border-on-surface flex justify-between items-center">
+              <span class="font-label-md uppercase">BLOC DE NOTAS</span>
+              <span class="material-symbols-outlined">edit_note</span>
+            </div>
+            <div class="p-stack-md flex-grow font-label-sm">
+              <p class="border-b-2 border-on-surface/10 pb-1 mb-1">Recordar revisar issue #402 antes del lunes.</p>
+              <p class="border-b-2 border-on-surface/10 pb-1 mb-1">Contactar con el equipo de DevOps.</p>
+              <p class="opacity-30">Haz clic para agregar una nota...</p>
+            </div>
+            <div class="bg-on-surface p-2 flex justify-end">
+              <span class="material-symbols-outlined text-surface text-sm cursor-pointer">add</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="mt-stack-lg border-t-4 border-on-surface pt-stack-lg flex flex-col md:flex-row justify-between items-center gap-stack-md pb-stack-lg">
+      <div class="flex items-center gap-stack-md">
+        <span class="font-display uppercase" style="font-size:24px">VORYEL_PULSE</span>
+        <span class="text-on-surface-variant font-label-sm">© 2026 · CONSOLIDADO DESDE STITCH PROJECT 9654246876178164230</span>
+      </div>
+      <div class="flex gap-stack-lg">
+        <a class="font-label-sm uppercase hover:text-primary underline cursor-pointer">PRIVACY_PROTOCOLS</a>
+        <a class="font-label-sm uppercase hover:text-primary underline cursor-pointer">TERMS_OF_ACCESS</a>
+        <a class="font-label-sm uppercase hover:text-primary underline cursor-pointer">SYSTEM_LOGS</a>
+      </div>
+    </footer>
+  </div>
+</main>
+
+<!-- Floating Action Button -->
+<button class="fixed bottom-8 right-8 nb-button w-16 h-16 flex items-center justify-center z-50">
+  <span class="material-symbols-outlined" style="font-size:32px; font-variation-settings: 'FILL' 1;">add</span>
+</button>
+
+<script>
+  // Navigation between screens
+  const links = document.querySelectorAll('.sidebar-link[data-target]');
+  const sections = document.querySelectorAll('.screen-section');
+  const pageTitle = document.getElementById('page-title');
+  const titles = {
+    'voryel-general': 'DASHBOARD_CORE',
+    'ai-orchestrator': 'AI_ORCHESTRATOR',
+    'dev-analytics': 'DEV_DASHBOARD',
+    'code-insights': 'COMPILER_INSIGHTS',
+    'light-editor': 'LORYQ_EDITOR',
+    'devops': 'DEVOPS_PANEL',
+    'releases-launcher': 'LAUNCHER_MGMT',
+    'reportes': 'MANAGE_REPORTES'
+  };
+  links.forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const target = link.dataset.target;
+      links.forEach(l => l.classList.remove('active'));
+      link.classList.add('active');
+      sections.forEach(s => s.classList.remove('active'));
+      document.getElementById(target).classList.add('active');
+      pageTitle.textContent = titles[target] || 'DASHBOARD_CORE';
+      window.scrollTo({top:0, behavior:'smooth'});
+    });
+  });
+
+  // Live clock
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('clock').textContent = now.toTimeString().split(' ')[0];
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // Button press effect
+  document.querySelectorAll('.nb-button').forEach(btn => {
+    btn.addEventListener('mousedown', () => {
+      btn.style.transform = 'translate(4px, 4px)';
+      btn.style.boxShadow = '0px 0px 0px 0px #1a1c1c';
+    });
+    btn.addEventListener('mouseup', () => {
+      btn.style.transform = '';
+      btn.style.boxShadow = '';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.transform = '';
+      btn.style.boxShadow = '';
+    });
+  });
+</script>
+</body>
+</html>
