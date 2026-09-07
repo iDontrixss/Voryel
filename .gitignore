@@ -27,3 +27,7 @@ compile_commands.json
 *.log
 *.tmp
 *~
+*.zip
+sendChatCompletion
+sendMessage
+Voryel Codigo.zip
